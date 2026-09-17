@@ -3,6 +3,7 @@ CLAUDE.md
 
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 secrets*
@@ -12,6 +13,7 @@ implementation_plan.md
 task.md
 system_architecture.md
 .cursorrules
+progress.md
 
 __pycache__/
 *.pyc
@@ -20,3 +22,5 @@ node_modules/
 .DS_Store
 dist/
 build/
+.next/
+*.tsbuildinfo
