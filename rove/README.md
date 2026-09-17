@@ -23,7 +23,7 @@ Copy `.env.example` to `.env` and set `GROQ_API_KEY`.
 Backend:
 
 ```
-cd backend && .venv/bin/uvicorn app.main:app --reload
+cd backend && .venv/bin/uvicorn app.main:app --reload --reload-dir app
 ```
 
 Frontend:
