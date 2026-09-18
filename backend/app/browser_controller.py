@@ -32,6 +32,10 @@ class BrowserController(ComputerController):
         self._browser = self._playwright.chromium.launch(headless=self._headless)
         self._page = self._browser.new_page()
 
+    @property
+    def is_launched(self) -> bool:
+        return self._page is not None
+
     def close(self) -> None:
         if self._browser is not None:
             self._browser.close()

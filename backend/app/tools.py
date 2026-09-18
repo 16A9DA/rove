@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
@@ -8,6 +9,8 @@ from enum import Enum
 from typing import Any, Callable
 
 from pydantic import BaseModel, Field, ValidationError
+
+from app.environment import ComputerEnvironment
 
 logger = logging.getLogger("rove.tools")
 
@@ -63,9 +66,76 @@ class FinishParams(BaseModel):
     success: bool = True
 
 
-def _pending_controller(_params: BaseModel) -> dict[str, Any]:
-    # phase 8 wires this to a real ComputerController
-    raise NotImplementedError("not wired to a ComputerController yet (phase 8)")
+def _make_screenshot(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, EmptyParams)
+        png_bytes = env.active.screenshot()
+        return {"screenshot_base64": base64.b64encode(png_bytes).decode("ascii")}
+
+    return handler
+
+
+def _make_open_url(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, OpenUrlParams)
+        env.open_url(params.url)
+        return {"url": params.url}
+
+    return handler
+
+
+def _make_open_application(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, ApplicationParams)
+        env.open_application(params.name)
+        return {"opened": params.name}
+
+    return handler
+
+
+def _make_focus_application(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, ApplicationParams)
+        env.focus_application(params.name)
+        return {"focused": params.name}
+
+    return handler
+
+
+def _make_click(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, ClickParams)
+        env.active.click(params.x, params.y)
+        return {"clicked": [params.x, params.y]}
+
+    return handler
+
+
+def _make_type(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, TypeParams)
+        env.active.type(params.text)
+        return {"typed": params.text}
+
+    return handler
+
+
+def _make_scroll(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, ScrollParams)
+        env.active.scroll(params.direction, params.amount)
+        return {"scrolled": params.direction, "amount": params.amount}
+
+    return handler
+
+
+def _make_keypress(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, KeypressParams)
+        env.active.keypress(params.keys)
+        return {"pressed": params.keys}
+
+    return handler
 
 
 def _wait(params: BaseModel) -> dict[str, Any]:
@@ -159,7 +229,8 @@ class ToolExecutor:
         try:
             output = tool.handler(params)
         except NotImplementedError as exc:
-            # handler exists but its controller isn't wired yet (phase 8), not a real failure
+            # a controller legitimately doesn't support this action (e.g. BrowserController
+            # has no concept of open_application) — a normal error result, not a crash
             return ToolResult(tool_call_id, name, str(exc), is_error=True)
         except Exception as exc:
             logger.warning("tool %s failed: %s", name, exc)
@@ -168,19 +239,19 @@ class ToolExecutor:
         return ToolResult(tool_call_id, name, json.dumps(output))
 
 
-def default_registry() -> ToolRegistry:
+def default_registry(env: ComputerEnvironment) -> ToolRegistry:
     # All LOW for now: none of these touch files/email/money. MEDIUM/HIGH land with
     # the permission system (phase 18) once file-op and account-changing tools exist.
     registry = ToolRegistry()
     for tool in (
-        Tool("screenshot", "Capture the current screen state.", EmptyParams, ToolRiskLevel.LOW, _pending_controller),
-        Tool("open_url", "Navigate the browser to a URL.", OpenUrlParams, ToolRiskLevel.LOW, _pending_controller),
-        Tool("open_application", "Open a native application by name.", ApplicationParams, ToolRiskLevel.LOW, _pending_controller),
-        Tool("focus_application", "Bring an already-open application to the foreground.", ApplicationParams, ToolRiskLevel.LOW, _pending_controller),
-        Tool("click", "Click at screen coordinates.", ClickParams, ToolRiskLevel.LOW, _pending_controller),
-        Tool("type", "Type text at the current focus.", TypeParams, ToolRiskLevel.LOW, _pending_controller),
-        Tool("scroll", "Scroll the active view.", ScrollParams, ToolRiskLevel.LOW, _pending_controller),
-        Tool("keypress", "Send a keyboard shortcut, e.g. 'cmd+t'.", KeypressParams, ToolRiskLevel.LOW, _pending_controller),
+        Tool("screenshot", "Capture the current screen state.", EmptyParams, ToolRiskLevel.LOW, _make_screenshot(env)),
+        Tool("open_url", "Navigate the browser to a URL.", OpenUrlParams, ToolRiskLevel.LOW, _make_open_url(env)),
+        Tool("open_application", "Open a native application by name.", ApplicationParams, ToolRiskLevel.LOW, _make_open_application(env)),
+        Tool("focus_application", "Bring an already-open application to the foreground.", ApplicationParams, ToolRiskLevel.LOW, _make_focus_application(env)),
+        Tool("click", "Click at screen coordinates.", ClickParams, ToolRiskLevel.LOW, _make_click(env)),
+        Tool("type", "Type text at the current focus.", TypeParams, ToolRiskLevel.LOW, _make_type(env)),
+        Tool("scroll", "Scroll the active view.", ScrollParams, ToolRiskLevel.LOW, _make_scroll(env)),
+        Tool("keypress", "Send a keyboard shortcut, e.g. 'cmd+t'.", KeypressParams, ToolRiskLevel.LOW, _make_keypress(env)),
         Tool("wait", "Pause for a short duration.", WaitParams, ToolRiskLevel.LOW, _wait),
         Tool("finish", "Report the task as complete with a result.", FinishParams, ToolRiskLevel.LOW, _finish),
     ):
