@@ -14,6 +14,7 @@ Rove is a macOS AI computer use assistant. It operates browsers and native appli
 
 ```
 cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cd backend && .venv/bin/python -m playwright install chromium
 cd frontend && npm install
 ```
 
