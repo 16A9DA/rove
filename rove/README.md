@@ -8,6 +8,7 @@ Rove is a macOS AI computer use assistant. It operates browsers and native appli
 
 * `frontend/` — Next.js, TypeScript, Tailwind CSS
 * `backend/` — FastAPI, Pydantic
+* `desktop/` — Electron macOS shell (menu bar + window)
 
 ## Install
 
@@ -31,3 +32,20 @@ Frontend:
 ```
 cd frontend && npm run dev
 ```
+
+Desktop shell:
+
+```
+cd desktop && npm install
+cd frontend && npm run dev   # keep this running in one terminal
+cd desktop && npm run dev    # loads http://localhost:3000 in the Electron window
+```
+
+For a production-like run (loads the static export instead of the dev server):
+
+```
+cd frontend && npm run build
+cd desktop && npm start
+```
+
+The app lives in the menu bar. Closing the window hides it; use "Quit Rove" from the tray menu or Cmd+Q to exit.
