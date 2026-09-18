@@ -69,6 +69,8 @@ def _pending_controller(_params: BaseModel) -> dict[str, Any]:
 
 
 def _wait(params: BaseModel) -> dict[str, Any]:
+    # Tool.handler is typed as BaseModel -> dict so any handler fits the dataclass field;
+    # narrow back to the real params type here (safe, ToolValidator already validated it).
     assert isinstance(params, WaitParams)
     seconds = min(params.seconds, MAX_WAIT_SECONDS)
     time.sleep(seconds)
@@ -89,6 +91,8 @@ class Tool:
     handler: Callable[[BaseModel], dict[str, Any]]
 
     def to_schema(self) -> dict[str, Any]:
+        # Matches the OpenAI/Groq function-calling tool format, so this can be
+        # passed straight into GroqProvider.complete(tools=...).
         return {
             "type": "function",
             "function": {
@@ -155,6 +159,7 @@ class ToolExecutor:
         try:
             output = tool.handler(params)
         except NotImplementedError as exc:
+            # handler exists but its controller isn't wired yet (phase 8), not a real failure
             return ToolResult(tool_call_id, name, str(exc), is_error=True)
         except Exception as exc:
             logger.warning("tool %s failed: %s", name, exc)
@@ -164,6 +169,8 @@ class ToolExecutor:
 
 
 def default_registry() -> ToolRegistry:
+    # All LOW for now: none of these touch files/email/money. MEDIUM/HIGH land with
+    # the permission system (phase 18) once file-op and account-changing tools exist.
     registry = ToolRegistry()
     for tool in (
         Tool("screenshot", "Capture the current screen state.", EmptyParams, ToolRiskLevel.LOW, _pending_controller),
