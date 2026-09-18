@@ -1,11 +1,3 @@
-"""Computer-use tool framework: schema, validation, execution, risk level.
-
-Tools that need a ComputerController (screenshot, open_url, open_application,
-focus_application, click, type_text, scroll, keypress) raise NotImplementedError
-until phase 8 wires them to a real controller. `wait` and `finish` need no
-controller and are fully functional now.
-"""
-
 from __future__ import annotations
 
 import json
@@ -30,9 +22,6 @@ class ToolRiskLevel(str, Enum):
 
 class ToolError(Exception):
     """Raised when a tool call cannot be validated or executed."""
-
-
-# --- parameter schemas -----------------------------------------------------
 
 
 class EmptyParams(BaseModel):
@@ -74,24 +63,21 @@ class FinishParams(BaseModel):
     success: bool = True
 
 
-# --- handlers ----------------------------------------------------------
-
-
-def _pending_controller(params: BaseModel) -> dict[str, Any]:
+def _pending_controller(_params: BaseModel) -> dict[str, Any]:
+    # phase 8 wires this to a real ComputerController
     raise NotImplementedError("not wired to a ComputerController yet (phase 8)")
 
 
-def _wait(params: WaitParams) -> dict[str, Any]:
+def _wait(params: BaseModel) -> dict[str, Any]:
+    assert isinstance(params, WaitParams)
     seconds = min(params.seconds, MAX_WAIT_SECONDS)
     time.sleep(seconds)
     return {"waited": seconds}
 
 
-def _finish(params: FinishParams) -> dict[str, Any]:
+def _finish(params: BaseModel) -> dict[str, Any]:
+    assert isinstance(params, FinishParams)
     return {"success": params.success, "result": params.result}
-
-
-# --- tool + registry -----------------------------------------------------
 
 
 @dataclass
