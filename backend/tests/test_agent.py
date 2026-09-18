@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app.main import app, get_provider
+from app.agent import ActionSummary, AgentResult
+from app.main import app, get_agent_runtime, get_provider
 from app.providers import LLMProviderError, LLMResponse, ToolCall
 
 client = TestClient(app)
@@ -58,6 +59,33 @@ def test_agent_message_malformed_response() -> None:
     response = client.post("/api/agent/message", json={"messages": [{"role": "user", "content": "hello"}]})
 
     assert response.status_code == 502
+
+
+class FakeRuntime:
+    def __init__(self, result: AgentResult) -> None:
+        self._result = result
+
+    def run(self, goal: str, cancel_check=None) -> AgentResult:
+        return self._result
+
+
+def test_agent_run_success() -> None:
+    result = AgentResult(
+        task_id="task-1",
+        success=True,
+        final_message="done",
+        actions=[ActionSummary(tool_name="finish", arguments="{}", result='{"result": "done"}', is_error=False)],
+    )
+    app.dependency_overrides[get_agent_runtime] = lambda: FakeRuntime(result)
+
+    response = client.post("/api/agent/run", json={"goal": "do something"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["task_id"] == "task-1"
+    assert body["success"] is True
+    assert body["final_message"] == "done"
+    assert body["actions"][0]["tool_name"] == "finish"
 
 
 def test_agent_message_provider_failure() -> None:

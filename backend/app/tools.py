@@ -226,6 +226,11 @@ class ToolExecutor:
         except ToolError as exc:
             return ToolResult(tool_call_id, name, str(exc), is_error=True)
 
+        # no real permission/confirmation system exists yet — block anything above LOW
+        # outright rather than silently letting it run unconfirmed.
+        if tool.risk_level != ToolRiskLevel.LOW:
+            return ToolResult(tool_call_id, name, f"{name} requires permission approval (not implemented yet)", is_error=True)
+
         try:
             output = tool.handler(params)
         except NotImplementedError as exc:

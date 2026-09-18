@@ -21,3 +21,22 @@ class ToolCallResponse(BaseModel):
 class AgentMessageResponse(BaseModel):
     content: str | None
     tool_calls: list[ToolCallResponse]
+
+
+class AgentRunRequest(BaseModel):
+    goal: str
+
+
+class ActionSummaryResponse(BaseModel):
+    tool_name: str
+    arguments: str
+    result: str
+    is_error: bool
+
+
+class AgentRunResponse(BaseModel):
+    task_id: str
+    success: bool
+    final_message: str | None
+    actions: list[ActionSummaryResponse]
+    error: str | None = None

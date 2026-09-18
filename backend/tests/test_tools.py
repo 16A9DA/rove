@@ -206,3 +206,14 @@ def test_executor_turns_notimplementederror_into_error_result() -> None:
     result = ToolExecutor(registry).execute("id1", "unsupported_action", "{}")
     assert result.is_error
     assert "not supported here" in result.content
+
+
+def test_executor_blocks_non_low_risk_tools() -> None:
+    from app.tools import EmptyParams, Tool
+
+    registry = default_registry(_env())
+    registry.register(Tool("dangerous_action", "test-only", EmptyParams, ToolRiskLevel.HIGH, lambda _params: {}))
+
+    result = ToolExecutor(registry).execute("id1", "dangerous_action", "{}")
+    assert result.is_error
+    assert "requires permission approval" in result.content

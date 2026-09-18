@@ -1,0 +1,100 @@
+import json
+
+from app.agent import AgentRuntime
+from app.environment import ComputerEnvironment
+from app.providers import LLMProviderError, LLMResponse, ToolCall
+from tests.test_tools import FakeBrowserController, FakeNativeController
+
+
+class ScriptedProvider:
+    """Returns each response in `responses` in order, one per .complete() call."""
+
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        self._responses = list(responses)
+        self.calls: list[tuple[list[dict], list[dict] | None]] = []
+
+    def complete(self, messages, tools=None):
+        self.calls.append((messages, tools))
+        return self._responses.pop(0)
+
+
+def _env() -> ComputerEnvironment:
+    return ComputerEnvironment(browser=FakeBrowserController(), native=FakeNativeController())
+
+
+def test_run_executes_tool_call_then_finishes() -> None:
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="open_application", arguments=json.dumps({"name": "Finder"}))]),
+            LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "done", "success": True}))]),
+        ]
+    )
+    runtime = AgentRuntime(provider, environment=_env())
+
+    result = runtime.run("open Finder")
+
+    assert result.success
+    assert result.final_message == "done"
+    assert [a.tool_name for a in result.actions] == ["open_application", "finish"]
+    assert not any(a.is_error for a in result.actions)
+
+
+def test_run_returns_direct_answer_when_model_calls_no_tool() -> None:
+    provider = ScriptedProvider([LLMResponse(content="no tools needed", tool_calls=[])])
+    runtime = AgentRuntime(provider, environment=_env())
+
+    result = runtime.run("say hi")
+
+    assert result.success
+    assert result.final_message == "no tools needed"
+    assert result.actions == []
+
+
+def test_run_stops_on_provider_error() -> None:
+    class FailingProvider:
+        def complete(self, messages, tools=None):
+            raise LLMProviderError("boom", status_code=502)
+
+    runtime = AgentRuntime(FailingProvider(), environment=_env())
+
+    result = runtime.run("do something")
+
+    assert not result.success
+    assert result.error == "boom"
+
+
+def test_run_stops_at_max_steps_without_finish() -> None:
+    # every step calls a real no-op tool (wait) that never finishes the task
+    responses = [LLMResponse(content=None, tool_calls=[ToolCall(id=str(i), name="wait", arguments="{}")]) for i in range(3)]
+    provider = ScriptedProvider(responses)
+    runtime = AgentRuntime(provider, environment=_env(), max_steps=3)
+
+    result = runtime.run("loop forever")
+
+    assert not result.success
+    assert "max steps" in result.error
+    assert len(result.actions) == 3
+
+
+def test_run_stops_when_cancelled() -> None:
+    provider = ScriptedProvider([LLMResponse(content="unreachable", tool_calls=[])])
+    runtime = AgentRuntime(provider, environment=_env())
+
+    result = runtime.run("do something", cancel_check=lambda: True)
+
+    assert not result.success
+    assert result.error == "cancelled"
+    assert provider.calls == []  # cancelled before ever calling the provider
+
+
+def test_action_history_never_carries_raw_provider_content() -> None:
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content="secret reasoning here", tool_calls=[ToolCall(id="1", name="finish", arguments=json.dumps({"result": "ok"}))]),
+        ]
+    )
+    runtime = AgentRuntime(provider, environment=_env())
+
+    result = runtime.run("do something")
+
+    assert all("secret reasoning" not in a.arguments and "secret reasoning" not in a.result for a in result.actions)
