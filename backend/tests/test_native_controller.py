@@ -34,17 +34,41 @@ def test_click_posts_move_down_up_in_order(controller, monkeypatch) -> None:
 
 def test_type_posts_keydown_and_keyup_per_character(controller, monkeypatch) -> None:
     create = MagicMock(return_value="event")
-    set_unicode = MagicMock()
+    set_flags = MagicMock()
     post = MagicMock()
     monkeypatch.setattr(native_controller.Quartz, "CGEventCreateKeyboardEvent", create)
-    monkeypatch.setattr(native_controller.Quartz, "CGEventKeyboardSetUnicodeString", set_unicode)
+    monkeypatch.setattr(native_controller.Quartz, "CGEventSetFlags", set_flags)
     monkeypatch.setattr(native_controller.Quartz, "CGEventPost", post)
 
     controller.type("ab")
 
     assert create.call_count == 4  # keydown + keyup per character
-    assert [call.args[2] for call in set_unicode.call_args_list] == ["a", "a", "b", "b"]
+    assert [call.args[1] for call in create.call_args_list] == [
+        native_controller._KEY_CODES["a"], native_controller._KEY_CODES["a"],
+        native_controller._KEY_CODES["b"], native_controller._KEY_CODES["b"],
+    ]
     assert post.call_count == 4
+
+
+def test_type_applies_shift_for_uppercase_and_symbols(controller, monkeypatch) -> None:
+    create = MagicMock(return_value="event")
+    set_flags = MagicMock()
+    monkeypatch.setattr(native_controller.Quartz, "CGEventCreateKeyboardEvent", create)
+    monkeypatch.setattr(native_controller.Quartz, "CGEventSetFlags", set_flags)
+    monkeypatch.setattr(native_controller.Quartz, "CGEventPost", MagicMock())
+
+    controller.type("A!")
+
+    assert [call.args[1] for call in create.call_args_list] == [
+        native_controller._KEY_CODES["a"], native_controller._KEY_CODES["a"],
+        native_controller._KEY_CODES["1"], native_controller._KEY_CODES["1"],
+    ]
+    assert all(call.args[1] == native_controller._MODIFIER_FLAGS["shift"] for call in set_flags.call_args_list)
+
+
+def test_type_unsupported_character_raises(controller) -> None:
+    with pytest.raises(ValueError, match="unsupported character"):
+        controller.type("€")
 
 
 def test_scroll_converts_direction_to_wheel_deltas(controller, monkeypatch) -> None:
@@ -174,6 +198,19 @@ def test_open_application_raises_on_failure(controller, monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="could not open"):
         controller.open_application("NoSuchApp")
+
+
+def test_open_application_waits_for_process_to_register(controller, monkeypatch) -> None:
+    target = MagicMock()
+    target.localizedName.return_value = "TextEdit"
+    workspace = MagicMock()
+    workspace.launchApplication_.return_value = True
+    # not running for the first poll, then registered
+    workspace.runningApplications.side_effect = [[], [target]]
+    _fake_workspace(monkeypatch, workspace)
+    monkeypatch.setattr(native_controller.time, "sleep", MagicMock())
+
+    controller.open_application("TextEdit")  # must not raise
 
 
 def test_list_windows_maps_fields(controller, monkeypatch) -> None:
