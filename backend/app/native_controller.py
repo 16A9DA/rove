@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import Quartz
+from AppKit import NSApplicationActivateIgnoringOtherApps, NSWorkspace
+
+from app.controllers import ComputerController
+
+# Requires two macOS grants for the process running this (System Settings -> Privacy &
+# Security): Accessibility, for click/type/keypress synthetic input events, and Screen
+# Recording, for screenshot(). open_application/focus_application/get_active_application
+# and list_windows() need neither.
+
+_SCROLL_VECTORS = {"up": (0, 1), "down": (0, -1), "left": (1, 0), "right": (-1, 0)}
+
+# Standard ANSI-US virtual keycodes (Carbon HIToolbox values) for keypress()'s named keys.
+# type() sidesteps this entirely via CGEventKeyboardSetUnicodeString, so it isn't needed there.
+_KEY_CODES = {
+    "a": 0x00, "s": 0x01, "d": 0x02, "f": 0x03, "h": 0x04, "g": 0x05, "z": 0x06, "x": 0x07,
+    "c": 0x08, "v": 0x09, "b": 0x0B, "q": 0x0C, "w": 0x0D, "e": 0x0E, "r": 0x0F,
+    "y": 0x10, "t": 0x11, "1": 0x12, "2": 0x13, "3": 0x14, "4": 0x15, "6": 0x16, "5": 0x17,
+    "=": 0x18, "9": 0x19, "7": 0x1A, "-": 0x1B, "8": 0x1C, "0": 0x1D, "]": 0x1E, "o": 0x1F,
+    "u": 0x20, "[": 0x21, "i": 0x22, "p": 0x23, "l": 0x25, "j": 0x26, "'": 0x27, "k": 0x28,
+    ";": 0x29, "\\": 0x2A, ",": 0x2B, "/": 0x2C, "n": 0x2D, "m": 0x2E, ".": 0x2F,
+    "tab": 0x30, "space": 0x31, "delete": 0x33, "escape": 0x35, "enter": 0x24, "return": 0x24,
+    "left": 0x7B, "right": 0x7C, "down": 0x7D, "up": 0x7E,
+}
+
+_MODIFIER_FLAGS = {
+    "cmd": Quartz.kCGEventFlagMaskCommand,
+    "command": Quartz.kCGEventFlagMaskCommand,
+    "ctrl": Quartz.kCGEventFlagMaskControl,
+    "control": Quartz.kCGEventFlagMaskControl,
+    "alt": Quartz.kCGEventFlagMaskAlternate,
+    "option": Quartz.kCGEventFlagMaskAlternate,
+    "shift": Quartz.kCGEventFlagMaskShift,
+}
+
+
+class NativeComputerController(ComputerController):
+    def __init__(self) -> None:
+        self._source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
+
+    def screenshot(self) -> bytes:
+        # CGWindowListCreateImage is deprecated on macOS 14+ but still works; swap for
+        # ScreenCaptureKit if/when Apple removes it.
+        image = Quartz.CGWindowListCreateImage(
+            Quartz.CGRectInfinite, Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault
+        )
+        if image is None:
+            raise RuntimeError("screenshot failed — check Screen Recording permission")
+
+        from AppKit import NSBitmapImageRep, NSPNGFileType
+
+        rep = NSBitmapImageRep.alloc().initWithCGImage_(image)
+        data = rep.representationUsingType_properties_(NSPNGFileType, None)
+        return bytes(data)
+
+    def click(self, x: int, y: int) -> None:
+        point = (x, y)
+        for event_type in (Quartz.kCGEventMouseMoved, Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
+            event = Quartz.CGEventCreateMouseEvent(self._source, event_type, point, Quartz.kCGMouseButtonLeft)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+
+    def type(self, text: str) -> None:
+        for char in text:
+            for key_down in (True, False):
+                event = Quartz.CGEventCreateKeyboardEvent(self._source, 0, key_down)
+                Quartz.CGEventKeyboardSetUnicodeString(event, len(char), char)
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+
+    def scroll(self, direction: str, amount: int = 3) -> None:
+        dx, dy = _SCROLL_VECTORS[direction]
+        event = Quartz.CGEventCreateScrollWheelEvent(self._source, Quartz.kCGScrollEventUnitLine, 2, dy * amount, dx * amount)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+
+    def keypress(self, keys: str) -> None:
+        *modifier_names, key_name = keys.split("+")
+        flags = 0
+        for modifier in modifier_names:
+            flags |= _MODIFIER_FLAGS[modifier.lower()]
+        keycode = _KEY_CODES[key_name.lower()]
+
+        for key_down in (True, False):
+            event = Quartz.CGEventCreateKeyboardEvent(self._source, keycode, key_down)
+            Quartz.CGEventSetFlags(event, flags)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+
+    def open_application(self, name: str) -> None:
+        if not NSWorkspace.sharedWorkspace().launchApplication_(name):
+            raise RuntimeError(f"could not open application: {name}")
+
+    def focus_application(self, name: str) -> None:
+        for app in NSWorkspace.sharedWorkspace().runningApplications():
+            if app.localizedName() == name:
+                app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+                return
+        raise RuntimeError(f"application not running: {name}")
+
+    def get_active_application(self) -> str | None:
+        app = NSWorkspace.sharedWorkspace().frontmostApplication()
+        return app.localizedName() if app else None
+
+    def list_windows(self) -> list[dict]:
+        windows = Quartz.CGWindowListCopyWindowInfo(
+            Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements, Quartz.kCGNullWindowID
+        )
+        return [
+            {"owner": w.get("kCGWindowOwnerName"), "title": w.get("kCGWindowName", ""), "bounds": w.get("kCGWindowBounds")}
+            for w in windows
+        ]
