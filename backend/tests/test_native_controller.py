@@ -112,12 +112,50 @@ def test_focus_application_activates_matching_running_app(controller, monkeypatc
     target.localizedName.return_value = "TextEdit"
     workspace = MagicMock()
     workspace.runningApplications.return_value = [other, target]
+    # activation "succeeds" instantly: frontmostApplication already reports TextEdit
+    workspace.frontmostApplication.return_value.localizedName.return_value = "TextEdit"
     _fake_workspace(monkeypatch, workspace)
 
     controller.focus_application("TextEdit")
 
     target.activateWithOptions_.assert_called_once()
     other.activateWithOptions_.assert_not_called()
+
+
+def test_focus_application_waits_for_activation_to_land(controller, monkeypatch) -> None:
+    target = MagicMock()
+    target.localizedName.return_value = "TextEdit"
+    workspace = MagicMock()
+    workspace.runningApplications.return_value = [target]
+    # frontmost app reports the old app for the first two polls, then the target — and
+    # stays "landed" after that, since focus_application checks once more after the loop
+    poll_count = {"n": 0}
+
+    def fake_frontmost_name() -> str:
+        poll_count["n"] += 1
+        return "TextEdit" if poll_count["n"] >= 3 else "Terminal"
+
+    workspace.frontmostApplication.return_value.localizedName.side_effect = fake_frontmost_name
+    _fake_workspace(monkeypatch, workspace)
+    monkeypatch.setattr(native_controller.time, "sleep", MagicMock())
+
+    controller.focus_application("TextEdit")  # must not raise
+
+
+def test_focus_application_raises_if_activation_never_lands(controller, monkeypatch) -> None:
+    target = MagicMock()
+    target.localizedName.return_value = "TextEdit"
+    workspace = MagicMock()
+    workspace.runningApplications.return_value = [target]
+    workspace.frontmostApplication.return_value.localizedName.return_value = "Terminal"
+    _fake_workspace(monkeypatch, workspace)
+    monkeypatch.setattr(native_controller.time, "sleep", MagicMock())
+    # fake clock jumps straight past the deadline so the test doesn't burn a real second
+    clock = iter([0, 0, native_controller.FOCUS_TIMEOUT_SECONDS + 1])
+    monkeypatch.setattr(native_controller.time, "monotonic", lambda: next(clock))
+
+    with pytest.raises(RuntimeError, match="did not become frontmost"):
+        controller.focus_application("TextEdit")
 
 
 def test_focus_application_raises_when_not_running(controller, monkeypatch) -> None:

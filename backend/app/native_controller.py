@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import time
+
 import Quartz
 from AppKit import NSApplicationActivateIgnoringOtherApps, NSWorkspace
+
+FOCUS_TIMEOUT_SECONDS = 1.0
+FOCUS_POLL_INTERVAL_SECONDS = 0.05
 
 from app.controllers import ComputerController
 
@@ -93,6 +98,13 @@ class NativeComputerController(ComputerController):
         for app in NSWorkspace.sharedWorkspace().runningApplications():
             if app.localizedName() == name:
                 app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+                # activateWithOptions_ is async — without this, click/type/keypress can
+                # fire before macOS actually switches focus and hit the wrong window.
+                deadline = time.monotonic() + FOCUS_TIMEOUT_SECONDS
+                while time.monotonic() < deadline and self.get_active_application() != name:
+                    time.sleep(FOCUS_POLL_INTERVAL_SECONDS)
+                if self.get_active_application() != name:
+                    raise RuntimeError(f"{name} did not become frontmost within {FOCUS_TIMEOUT_SECONDS}s")
                 return
         raise RuntimeError(f"application not running: {name}")
 
