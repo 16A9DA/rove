@@ -2,6 +2,8 @@
 
 import { useState, type KeyboardEvent } from "react";
 
+const ROVE_API_BASE = "http://127.0.0.1:8000";
+
 export function MessageInput({
   disabled,
   onSend,
@@ -11,6 +13,7 @@ export function MessageInput({
 }) {
   const [value, setValue] = useState("");
   const [listening, setListening] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
 
   const submit = () => {
     const trimmed = value.trim();
@@ -26,8 +29,30 @@ export function MessageInput({
     }
   };
 
+  const toggleMic = async () => {
+    setMicError(null);
+    try {
+      if (!listening) {
+        const response = await fetch(`${ROVE_API_BASE}/api/stt/start`, { method: "POST" });
+        if (!response.ok) throw new Error((await response.json()).detail ?? "could not start recording");
+        setListening(true);
+        return;
+      }
+
+      setListening(false);
+      const response = await fetch(`${ROVE_API_BASE}/api/stt/stop`, { method: "POST" });
+      if (!response.ok) throw new Error((await response.json()).detail ?? "could not transcribe");
+      const { transcript } = (await response.json()) as { transcript: string };
+      if (transcript) setValue((current) => (current ? `${current} ${transcript}` : transcript));
+    } catch (error) {
+      setListening(false);
+      setMicError(error instanceof Error ? error.message : "microphone error");
+    }
+  };
+
   return (
     <div className="border-t border-white/10 bg-white/[0.02] p-4">
+      {micError && <p className="mb-2 px-2 text-xs text-red-400">{micError}</p>}
       <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-white/[0.04] p-2 focus-within:border-white/20">
         <textarea
           value={value}
@@ -42,8 +67,9 @@ export function MessageInput({
         <button
           type="button"
           aria-pressed={listening}
-          onClick={() => setListening((v) => !v)}
-          className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors duration-150 active:scale-95 ${
+          onClick={toggleMic}
+          disabled={disabled}
+          className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors duration-150 active:scale-95 disabled:opacity-50 ${
             listening
               ? "border-blue-400/40 bg-blue-400/20 text-blue-300"
               : "border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/[0.08]"

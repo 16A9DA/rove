@@ -8,3 +8,6 @@ pyobjc-framework-Quartz
 pyobjc-framework-Cocoa
 pytest
 httpx
+useful-moonshine
+sounddevice
+soundfile

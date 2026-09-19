@@ -3,6 +3,7 @@ from functools import lru_cache
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -18,9 +19,15 @@ from app.schemas import (
     AgentRunRequest,
     AgentRunResponse,
     ToolCallResponse,
+    TranscribeResponse,
 )
+from app.stt import MoonshineSTT, SpeechToTextProvider, STTError
 
 app = FastAPI(title="Rove Agent API")
+
+# Local desktop app only (Electron/localhost frontend calling a 127.0.0.1 backend),
+# never exposed publicly — allow-all is fine and avoids per-origin config.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.get("/health")
@@ -86,3 +93,26 @@ def agent_run(request: AgentRunRequest, runtime: AgentRuntime = Depends(get_orch
         actions=[ActionSummaryResponse(tool_name=a.tool_name, arguments=a.arguments, result=a.result, is_error=a.is_error) for a in result.actions],
         error=result.error,
     )
+
+
+@lru_cache
+def get_stt_provider() -> SpeechToTextProvider:
+    return MoonshineSTT()
+
+
+@app.post("/api/stt/start")
+def stt_start(stt: SpeechToTextProvider = Depends(get_stt_provider)) -> dict[str, str]:
+    try:
+        stt.start_recording()
+    except STTError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "recording"}
+
+
+@app.post("/api/stt/stop", response_model=TranscribeResponse)
+def stt_stop(stt: SpeechToTextProvider = Depends(get_stt_provider)) -> TranscribeResponse:
+    try:
+        transcript = stt.stop_recording()
+    except STTError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TranscribeResponse(transcript=transcript)
