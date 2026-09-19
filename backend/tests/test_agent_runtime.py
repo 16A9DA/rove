@@ -1,9 +1,11 @@
 import json
 
-from app.agent import AgentRuntime
-from app.environment import ComputerEnvironment
+from app.agents import AgentRuntime
 from app.providers import LLMProviderError, LLMResponse, ToolCall
-from tests.test_tools import FakeBrowserController, FakeNativeController
+from app.tools import browser_registry, desktop_registry
+from tests.conftest import FakeBrowserController, FakeNativeController
+
+SYSTEM_PROMPT = "test system prompt"
 
 
 class ScriptedProvider:
@@ -18,10 +20,6 @@ class ScriptedProvider:
         return self._responses.pop(0)
 
 
-def _env() -> ComputerEnvironment:
-    return ComputerEnvironment(browser=FakeBrowserController(), native=FakeNativeController())
-
-
 def test_run_executes_tool_call_then_finishes() -> None:
     provider = ScriptedProvider(
         [
@@ -29,7 +27,7 @@ def test_run_executes_tool_call_then_finishes() -> None:
             LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "done", "success": True}))]),
         ]
     )
-    runtime = AgentRuntime(provider, environment=_env())
+    runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
 
     result = runtime.run("open Finder")
 
@@ -41,7 +39,7 @@ def test_run_executes_tool_call_then_finishes() -> None:
 
 def test_run_returns_direct_answer_when_model_calls_no_tool() -> None:
     provider = ScriptedProvider([LLMResponse(content="no tools needed", tool_calls=[])])
-    runtime = AgentRuntime(provider, environment=_env())
+    runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
 
     result = runtime.run("say hi")
 
@@ -62,7 +60,7 @@ def test_run_retries_once_on_parse_failure_then_succeeds() -> None:
             return LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="finish", arguments=json.dumps({"result": "done"}))])
 
     provider = FlakyProvider()
-    runtime = AgentRuntime(provider, environment=_env())
+    runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
 
     result = runtime.run("do something")
 
@@ -81,7 +79,7 @@ def test_run_does_not_retry_non_parse_failure_errors() -> None:
             raise LLMProviderError("invalid Groq credentials", status_code=401)
 
     provider = FlakyProvider()
-    runtime = AgentRuntime(provider, environment=_env())
+    runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
 
     result = runtime.run("do something")
 
@@ -94,7 +92,7 @@ def test_run_stops_on_provider_error() -> None:
         def complete(self, messages, tools=None):
             raise LLMProviderError("boom", status_code=502)
 
-    runtime = AgentRuntime(FailingProvider(), environment=_env())
+    runtime = AgentRuntime(FailingProvider(), desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
 
     result = runtime.run("do something")
 
@@ -106,7 +104,7 @@ def test_run_stops_at_max_steps_without_finish() -> None:
     # every step calls a real no-op tool (wait) that never finishes the task
     responses = [LLMResponse(content=None, tool_calls=[ToolCall(id=str(i), name="wait", arguments="{}")]) for i in range(3)]
     provider = ScriptedProvider(responses)
-    runtime = AgentRuntime(provider, environment=_env(), max_steps=3)
+    runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT, max_steps=3)
 
     result = runtime.run("loop forever")
 
@@ -117,7 +115,7 @@ def test_run_stops_at_max_steps_without_finish() -> None:
 
 def test_run_stops_when_cancelled() -> None:
     provider = ScriptedProvider([LLMResponse(content="unreachable", tool_calls=[])])
-    runtime = AgentRuntime(provider, environment=_env())
+    runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
 
     result = runtime.run("do something", cancel_check=lambda: True)
 
@@ -126,34 +124,30 @@ def test_run_stops_when_cancelled() -> None:
     assert provider.calls == []  # cancelled before ever calling the provider
 
 
-def test_run_opens_final_url_in_real_browser_after_browser_finish() -> None:
+def test_run_calls_on_finish_after_successful_finish() -> None:
     provider = ScriptedProvider(
         [
             LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="open_url", arguments=json.dumps({"url": "https://example.com"}))]),
             LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "done"}))]),
         ]
     )
-    opened: list[str] = []
-    runtime = AgentRuntime(provider, environment=_env(), opener=opened.append)
+    calls: list[str] = []
+    runtime = AgentRuntime(provider, browser_registry(FakeBrowserController()), SYSTEM_PROMPT, on_finish=lambda: calls.append("finished"))
 
     runtime.run("look something up")
 
-    assert opened == ["https://example.com"]
+    assert calls == ["finished"]
 
 
-def test_run_does_not_open_browser_when_native_only() -> None:
-    provider = ScriptedProvider(
-        [
-            LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="open_application", arguments=json.dumps({"name": "Finder"}))]),
-            LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "done"}))]),
-        ]
-    )
-    opened: list[str] = []
-    runtime = AgentRuntime(provider, environment=_env(), opener=opened.append)
+def test_run_does_not_call_on_finish_when_max_steps_exceeded() -> None:
+    responses = [LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="wait", arguments="{}")])]
+    provider = ScriptedProvider(responses)
+    calls: list[str] = []
+    runtime = AgentRuntime(provider, browser_registry(FakeBrowserController()), SYSTEM_PROMPT, max_steps=1, on_finish=lambda: calls.append("finished"))
 
-    runtime.run("open Finder")
+    runtime.run("do something")
 
-    assert opened == []
+    assert calls == []
 
 
 def test_run_feeds_screenshot_back_as_image_message() -> None:
@@ -163,7 +157,7 @@ def test_run_feeds_screenshot_back_as_image_message() -> None:
             LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "saw it"}))]),
         ]
     )
-    runtime = AgentRuntime(provider, environment=_env())
+    runtime = AgentRuntime(provider, browser_registry(FakeBrowserController()), SYSTEM_PROMPT)
 
     result = runtime.run("look at the screen")
 
@@ -182,7 +176,7 @@ def test_action_history_never_carries_raw_provider_content() -> None:
             LLMResponse(content="secret reasoning here", tool_calls=[ToolCall(id="1", name="finish", arguments=json.dumps({"result": "ok"}))]),
         ]
     )
-    runtime = AgentRuntime(provider, environment=_env())
+    runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
 
     result = runtime.run("do something")
 

@@ -4,13 +4,11 @@ import json
 import logging
 import time
 import uuid
-import webbrowser
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from app.environment import ComputerEnvironment
 from app.providers import LLMProvider, LLMProviderError
-from app.tools import ToolExecutor, ToolRegistry, default_registry
+from app.tools import ToolExecutor, ToolRegistry
 
 logger = logging.getLogger("rove.agent")
 
@@ -23,29 +21,6 @@ DEFAULT_TIMEOUT_SECONDS = 240.0
 # parse failure on the model's side, not a bad request on ours — worth one retry before
 # giving up. Other status codes (auth, rate-limit, timeout) are not retried here.
 PARSE_FAILURE_RETRY_ATTEMPTS = 1
-
-SYSTEM_PROMPT = (
-    "You are Rove, an AI that operates the user's computer through the available tools. "
-    "Use tools to accomplish the user's goal, then call finish with the result. "
-    "Use get_text to read page text cheaply (browser only). For native apps, or when you "
-    "need to see layout/buttons/dialogs rather than just text, call screenshot — you can "
-    "see the image it returns and click real coordinates on what you see. "
-    "Interact like a person would: navigate to a page, type into its focused input, "
-    "then press Return to submit, rather than building search/query URLs by hand. "
-    "Opening an application does not guarantee an editable document is focused — "
-    "if typing needs a document (e.g. a text editor), create/focus one first "
-    "(e.g. a New Document keypress) before typing into it. If an Open-file dialog "
-    "appears instead of a document, press escape to dismiss it, then create a new document. "
-    "To create, fill, and save a file in one flow: open the app, create a new document, "
-    "type the content, then press cmd+shift+s to open the save panel. Inside that panel, "
-    "press cmd+shift+g to open 'Go to Folder', type the full destination folder path "
-    "(e.g. ~/Desktop or ~/Documents/Reports), press Return to jump there, then type the "
-    "filename (with extension) and press Return again to confirm the save. "
-    "If the user asks to save an already-open file without changing its name or location, "
-    "press cmd+s instead. "
-    "If the user asks to close a file, press cmd+w to close only that document's window — "
-    "never cmd+q, which quits the whole app and closes every other open document too."
-)
 
 
 @dataclass
@@ -67,22 +42,26 @@ class AgentResult:
 
 
 class AgentRuntime:
+    """Generic tool-calling loop. Reused as-is for the Orchestrator and every
+    specialist sub-agent — what differs between them is only the system prompt
+    and tool registry passed in, not the loop itself."""
+
     def __init__(
         self,
         provider: LLMProvider,
-        environment: ComputerEnvironment | None = None,
-        registry: ToolRegistry | None = None,
+        registry: ToolRegistry,
+        system_prompt: str,
         max_steps: int = DEFAULT_MAX_STEPS,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-        opener: Callable[[str], object] = webbrowser.open,
+        on_finish: Callable[[], None] | None = None,
     ) -> None:
         self._provider = provider
-        self._environment = environment or ComputerEnvironment()
-        self._registry = registry or default_registry(self._environment)
-        self._executor = ToolExecutor(self._registry)
+        self._registry = registry
+        self._system_prompt = system_prompt
+        self._executor = ToolExecutor(registry)
         self._max_steps = max_steps
         self._timeout_seconds = timeout_seconds
-        self._opener = opener
+        self._on_finish = on_finish
 
     def run(self, goal: str, cancel_check: Callable[[], bool] | None = None) -> AgentResult:
         """Drive the tool-calling loop until the model calls `finish`, answers with no
@@ -96,7 +75,7 @@ class AgentRuntime:
         """
         task_id = str(uuid.uuid4())
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": goal},
         ]
         actions: list[ActionSummary] = []
@@ -159,12 +138,8 @@ class AgentRuntime:
 
                 if tool_call.name == "finish" and not result.is_error:
                     payload = json.loads(result.content)
-                    self._show_browser_result()
+                    if self._on_finish is not None:
+                        self._on_finish()
                     return AgentResult(task_id, payload.get("success", True), payload.get("result"), actions)
 
         return AgentResult(task_id, False, None, actions, error=f"exceeded max steps ({self._max_steps})")
-
-    def _show_browser_result(self) -> None:
-        browser = self._environment.browser
-        if self._environment.active is browser and browser.is_launched:
-            self._opener(browser.current_url)

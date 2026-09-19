@@ -1,6 +1,6 @@
 import pytest
 
-from app.browser_controller import BrowserController, _to_playwright_key
+from app.controllers.browser import BrowserController, _to_playwright_key
 
 PAGE_HTML = """<!doctype html>
 <html><head><title>Rove Test Page</title></head>

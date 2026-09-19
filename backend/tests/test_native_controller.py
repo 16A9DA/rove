@@ -2,8 +2,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app.native_controller as native_controller
-from app.native_controller import NativeComputerController
+import app.controllers.native as native_controller
+from app.controllers.native import NativeComputerController
 
 # These tests mock every Quartz/AppKit call — real ones drive the live mouse/keyboard/
 # screen, which isn't safe to fire off in an automated run. See the phase 7 test plan

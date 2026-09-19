@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app.agent import ActionSummary, AgentResult
-from app.main import app, get_agent_runtime, get_provider
+from app.agents import ActionSummary, AgentResult
+from app.main import app, get_orchestrator, get_provider
 from app.providers import LLMProviderError, LLMResponse, ToolCall
 
 client = TestClient(app)
@@ -76,7 +76,7 @@ def test_agent_run_success() -> None:
         final_message="done",
         actions=[ActionSummary(tool_name="finish", arguments="{}", result='{"result": "done"}', is_error=False)],
     )
-    app.dependency_overrides[get_agent_runtime] = lambda: FakeRuntime(result)
+    app.dependency_overrides[get_orchestrator] = lambda: FakeRuntime(result)
 
     response = client.post("/api/agent/run", json={"goal": "do something"})
 

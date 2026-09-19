@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 
-from app.controllers import ComputerController
+from app.controllers.base import ComputerController
 
 # direction -> (dx, dy) unit vector; multiplied by amount * PIXELS_PER_UNIT for mouse.wheel
 _SCROLL_VECTORS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}

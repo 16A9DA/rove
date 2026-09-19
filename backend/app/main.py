@@ -7,8 +7,8 @@ from fastapi import Depends, FastAPI, HTTPException
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
-from app.agent import AgentRuntime
-from app.environment import ComputerEnvironment
+from app.agents import AgentRuntime, orchestrator_runtime
+from app.controllers import BrowserController, NativeComputerController
 from app.providers import LLMProvider, LLMProviderError, GroqProvider
 from app.schemas import (
     ActionSummaryResponse,
@@ -52,19 +52,25 @@ def agent_message(
 
 
 @lru_cache
-def get_environment() -> ComputerEnvironment:
-    return ComputerEnvironment()
+def get_browser_controller() -> BrowserController:
+    return BrowserController()
 
 
-def get_agent_runtime(
+@lru_cache
+def get_native_controller() -> NativeComputerController:
+    return NativeComputerController()
+
+
+def get_orchestrator(
     provider: LLMProvider = Depends(get_provider),
-    environment: ComputerEnvironment = Depends(get_environment),
+    browser: BrowserController = Depends(get_browser_controller),
+    native: NativeComputerController = Depends(get_native_controller),
 ) -> AgentRuntime:
-    return AgentRuntime(provider, environment)
+    return orchestrator_runtime(provider, browser=browser, native=native)
 
 
 @app.post("/api/agent/run", response_model=AgentRunResponse)
-def agent_run(request: AgentRunRequest, runtime: AgentRuntime = Depends(get_agent_runtime)) -> AgentRunResponse:
+def agent_run(request: AgentRunRequest, runtime: AgentRuntime = Depends(get_orchestrator)) -> AgentRunResponse:
     result = runtime.run(request.goal)
     return AgentRunResponse(
         task_id=result.task_id,

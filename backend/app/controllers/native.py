@@ -8,7 +8,7 @@ from AppKit import NSApplicationActivateIgnoringOtherApps, NSWorkspace
 FOCUS_TIMEOUT_SECONDS = 1.0
 FOCUS_POLL_INTERVAL_SECONDS = 0.05
 
-from app.controllers import ComputerController
+from app.controllers.base import ComputerController
 
 # Requires two macOS grants for the process running this (System Settings -> Privacy &
 # Security): Accessibility, for click/type/keypress synthetic input events, and Screen
