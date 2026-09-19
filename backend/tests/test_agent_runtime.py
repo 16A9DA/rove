@@ -87,6 +87,36 @@ def test_run_stops_when_cancelled() -> None:
     assert provider.calls == []  # cancelled before ever calling the provider
 
 
+def test_run_opens_final_url_in_real_browser_after_browser_finish() -> None:
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="open_url", arguments=json.dumps({"url": "https://example.com"}))]),
+            LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "done"}))]),
+        ]
+    )
+    opened: list[str] = []
+    runtime = AgentRuntime(provider, environment=_env(), opener=opened.append)
+
+    runtime.run("look something up")
+
+    assert opened == ["https://example.com"]
+
+
+def test_run_does_not_open_browser_when_native_only() -> None:
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="open_application", arguments=json.dumps({"name": "Finder"}))]),
+            LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "done"}))]),
+        ]
+    )
+    opened: list[str] = []
+    runtime = AgentRuntime(provider, environment=_env(), opener=opened.append)
+
+    runtime.run("open Finder")
+
+    assert opened == []
+
+
 def test_action_history_never_carries_raw_provider_content() -> None:
     provider = ScriptedProvider(
         [

@@ -38,3 +38,8 @@ class ComputerController(ABC):
     @abstractmethod
     def get_active_application(self) -> str | None:
         raise NotImplementedError
+
+    @abstractmethod
+    def get_text(self) -> str:
+        # extract visible text so a non-vision model can "observe" without a screenshot
+        raise NotImplementedError

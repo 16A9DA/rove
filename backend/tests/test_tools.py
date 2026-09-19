@@ -16,6 +16,10 @@ class FakeBrowserController(ComputerController):
     def is_launched(self) -> bool:
         return self.launched
 
+    @property
+    def current_url(self) -> str | None:
+        return self.url
+
     def launch(self) -> None:
         self.launched = True
 
@@ -46,6 +50,9 @@ class FakeBrowserController(ComputerController):
 
     def get_active_application(self) -> str | None:
         return "Chrome" if self.launched else None
+
+    def get_text(self) -> str:
+        return "fake browser page text"
 
 
 class FakeNativeController(ComputerController):
@@ -79,6 +86,9 @@ class FakeNativeController(ComputerController):
     def get_active_application(self) -> str | None:
         return self.active_app
 
+    def get_text(self) -> str:
+        raise NotImplementedError("FakeNativeController cannot extract window text")
+
 
 def _env() -> ComputerEnvironment:
     return ComputerEnvironment(browser=FakeBrowserController(), native=FakeNativeController())
@@ -91,7 +101,7 @@ def _registry():
 def test_registry_lists_all_initial_tools() -> None:
     names = {tool.name for tool in _registry().list()}
     assert names == {
-        "screenshot", "open_url", "open_application", "focus_application",
+        "screenshot", "get_text", "open_url", "open_application", "focus_application",
         "click", "type", "scroll", "keypress", "wait", "finish",
     }
 
@@ -191,6 +201,16 @@ def test_screenshot_returns_base64_from_active_controller() -> None:
     assert not result.is_error
     payload = json.loads(result.content)
     assert base64.b64decode(payload["screenshot_base64"]) == b"fake-native-png"
+
+
+def test_get_text_returns_text_from_active_controller() -> None:
+    env = _env()
+    env.open_url("http://example.com")
+
+    result = ToolExecutor(default_registry(env)).execute("id1", "get_text", "{}")
+
+    assert not result.is_error
+    assert json.loads(result.content)["text"] == "fake browser page text"
 
 
 def test_executor_turns_notimplementederror_into_error_result() -> None:

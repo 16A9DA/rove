@@ -75,6 +75,14 @@ def _make_screenshot(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str
     return handler
 
 
+def _make_get_text(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, EmptyParams)
+        return {"text": env.active.get_text()}
+
+    return handler
+
+
 def _make_open_url(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, OpenUrlParams)
@@ -250,6 +258,7 @@ def default_registry(env: ComputerEnvironment) -> ToolRegistry:
     registry = ToolRegistry()
     for tool in (
         Tool("screenshot", "Capture the current screen state.", EmptyParams, ToolRiskLevel.LOW, _make_screenshot(env)),
+        Tool("get_text", "Read the visible text of the current page/window (use this to observe results, not screenshot).", EmptyParams, ToolRiskLevel.LOW, _make_get_text(env)),
         Tool("open_url", "Navigate the browser to a URL.", OpenUrlParams, ToolRiskLevel.LOW, _make_open_url(env)),
         Tool("open_application", "Open a native application by name.", ApplicationParams, ToolRiskLevel.LOW, _make_open_application(env)),
         Tool("focus_application", "Bring an already-open application to the foreground.", ApplicationParams, ToolRiskLevel.LOW, _make_focus_application(env)),

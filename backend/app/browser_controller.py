@@ -88,3 +88,7 @@ class BrowserController(ComputerController):
 
     def get_active_application(self) -> str | None:
         return "Chrome" if self._page is not None else None
+
+    def get_text(self) -> str:
+        # ponytail: flat length cap, not smart summarization — raise if a real task needs more
+        return self.page.inner_text("body")[:5000]

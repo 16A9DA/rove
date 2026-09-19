@@ -35,6 +35,10 @@ class FakeComputerController(ComputerController):
     def get_active_application(self) -> str | None:
         return self.active_app
 
+    def get_text(self) -> str:
+        self.calls.append(("get_text", ()))
+        return "fake page text"
+
 
 def test_cannot_instantiate_abstract_controller() -> None:
     with pytest.raises(TypeError):

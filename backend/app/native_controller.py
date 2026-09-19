@@ -145,6 +145,9 @@ class NativeComputerController(ComputerController):
         app = NSWorkspace.sharedWorkspace().frontmostApplication()
         return app.localizedName() if app else None
 
+    def get_text(self) -> str:
+        raise NotImplementedError("NativeComputerController cannot extract window text")
+
     def list_windows(self) -> list[dict]:
         windows = Quartz.CGWindowListCopyWindowInfo(
             Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements, Quartz.kCGNullWindowID

@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import uuid
+import webbrowser
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -18,7 +19,10 @@ DEFAULT_TIMEOUT_SECONDS = 120.0
 
 SYSTEM_PROMPT = (
     "You are Rove, an AI that operates the user's computer through the available tools. "
-    "Use tools to accomplish the user's goal, then call finish with the result."
+    "Use tools to accomplish the user's goal, then call finish with the result. "
+    "You cannot see screenshots — use get_text to read what is on screen. "
+    "Interact like a person would: navigate to a page, type into its focused input, "
+    "then press Return to submit, rather than building search/query URLs by hand."
 )
 
 
@@ -48,6 +52,7 @@ class AgentRuntime:
         registry: ToolRegistry | None = None,
         max_steps: int = DEFAULT_MAX_STEPS,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        opener: Callable[[str], object] = webbrowser.open,
     ) -> None:
         self._provider = provider
         self._environment = environment or ComputerEnvironment()
@@ -55,6 +60,7 @@ class AgentRuntime:
         self._executor = ToolExecutor(self._registry)
         self._max_steps = max_steps
         self._timeout_seconds = timeout_seconds
+        self._opener = opener
 
     def run(self, goal: str, cancel_check: Callable[[], bool] | None = None) -> AgentResult:
         task_id = str(uuid.uuid4())
@@ -99,6 +105,12 @@ class AgentRuntime:
 
                 if tool_call.name == "finish" and not result.is_error:
                     payload = json.loads(result.content)
+                    self._show_browser_result()
                     return AgentResult(task_id, payload.get("success", True), payload.get("result"), actions)
 
         return AgentResult(task_id, False, None, actions, error=f"exceeded max steps ({self._max_steps})")
+
+    def _show_browser_result(self) -> None:
+        browser = self._environment.browser
+        if self._environment.active is browser and browser.is_launched:
+            self._opener(browser.current_url)
