@@ -9,6 +9,7 @@ logging.basicConfig(level=logging.INFO)
 
 from app.agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
+from app.memory import MemoryService
 from app.providers import LLMProvider, LLMProviderError, GroqProvider
 from app.schemas import (
     ActionSummaryResponse,
@@ -61,12 +62,18 @@ def get_native_controller() -> NativeComputerController:
     return NativeComputerController()
 
 
+@lru_cache
+def get_memory_service() -> MemoryService:
+    return MemoryService()
+
+
 def get_orchestrator(
     provider: LLMProvider = Depends(get_provider),
     browser: BrowserController = Depends(get_browser_controller),
     native: NativeComputerController = Depends(get_native_controller),
+    memory: MemoryService = Depends(get_memory_service),
 ) -> AgentRuntime:
-    return orchestrator_runtime(provider, browser=browser, native=native)
+    return orchestrator_runtime(provider, browser=browser, native=native, memory=memory)
 
 
 @app.post("/api/agent/run", response_model=AgentRunResponse)

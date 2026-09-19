@@ -1,6 +1,7 @@
 import json
 
 from app.agents import orchestrator_runtime
+from app.memory import MemoryCategory, MemoryService
 from app.providers import LLMResponse, ToolCall
 from tests.conftest import FakeBrowserController, FakeNativeController
 
@@ -69,4 +70,40 @@ def test_orchestrator_never_registers_raw_screen_tools() -> None:
 
     names = {tool.name for tool in runtime._registry.list()}
 
-    assert names == {"delegate_browser", "delegate_desktop", "delegate_research", "finish"}
+    assert names == {"delegate_browser", "delegate_desktop", "delegate_research", "remember", "finish"}
+
+
+def test_remember_writes_to_memory_service(tmp_path) -> None:
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="remember", arguments=json.dumps({"category": "personal", "content": "likes dark mode"}))]),
+            LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "done"}))]),
+        ]
+    )
+    memory = MemoryService(tmp_path / "test.db")
+    runtime = orchestrator_runtime(provider, browser=FakeBrowserController(), native=FakeNativeController(), memory=memory)
+
+    result = runtime.run("remember I like dark mode")
+
+    assert result.success
+    assert memory.recall() == [("personal", "likes dark mode")]
+
+
+def test_recalled_memory_is_injected_into_orchestrator_and_sub_agent_prompts(tmp_path) -> None:
+    memory = MemoryService(tmp_path / "test.db")
+    memory.remember(MemoryCategory.PERSONAL, "likes dark mode")
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="delegate_browser", arguments=json.dumps({"subtask": "open example.com"}))]),
+            LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "opened it"}))]),
+            LLMResponse(content=None, tool_calls=[ToolCall(id="3", name="finish", arguments=json.dumps({"result": "done"}))]),
+        ]
+    )
+    runtime = orchestrator_runtime(provider, browser=FakeBrowserController(), native=FakeNativeController(), memory=memory)
+
+    runtime.run("open example.com")
+
+    orchestrator_system_message = provider.calls[0][0]
+    sub_agent_system_message = provider.calls[1][0]
+    assert "likes dark mode" in orchestrator_system_message["content"]
+    assert "likes dark mode" in sub_agent_system_message["content"]
