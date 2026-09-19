@@ -15,7 +15,10 @@ from app.tools import ToolExecutor, ToolRegistry, default_registry
 logger = logging.getLogger("rove.agent")
 
 DEFAULT_MAX_STEPS = 20
-DEFAULT_TIMEOUT_SECONDS = 120.0
+# ponytail: flat constant, not measured per-model. Vision round-trips (image upload +
+# inference) run noticeably slower than text-only steps — raise further if screenshot-heavy
+# goals still time out, or make this model-aware if that becomes common.
+DEFAULT_TIMEOUT_SECONDS = 240.0
 # malformed-request (400) responses from the provider are usually a one-off tool-call
 # parse failure on the model's side, not a bad request on ours — worth one retry before
 # giving up. Other status codes (auth, rate-limit, timeout) are not retried here.
@@ -24,12 +27,24 @@ PARSE_FAILURE_RETRY_ATTEMPTS = 1
 SYSTEM_PROMPT = (
     "You are Rove, an AI that operates the user's computer through the available tools. "
     "Use tools to accomplish the user's goal, then call finish with the result. "
-    "Use get_text to read what is on screen — you have no way to see screenshots. "
+    "Use get_text to read page text cheaply (browser only). For native apps, or when you "
+    "need to see layout/buttons/dialogs rather than just text, call screenshot — you can "
+    "see the image it returns and click real coordinates on what you see. "
     "Interact like a person would: navigate to a page, type into its focused input, "
     "then press Return to submit, rather than building search/query URLs by hand. "
     "Opening an application does not guarantee an editable document is focused — "
     "if typing needs a document (e.g. a text editor), create/focus one first "
-    "(e.g. a New Document keypress) before typing into it."
+    "(e.g. a New Document keypress) before typing into it. If an Open-file dialog "
+    "appears instead of a document, press escape to dismiss it, then create a new document. "
+    "To create, fill, and save a file in one flow: open the app, create a new document, "
+    "type the content, then press cmd+shift+s to open the save panel. Inside that panel, "
+    "press cmd+shift+g to open 'Go to Folder', type the full destination folder path "
+    "(e.g. ~/Desktop or ~/Documents/Reports), press Return to jump there, then type the "
+    "filename (with extension) and press Return again to confirm the save. "
+    "If the user asks to save an already-open file without changing its name or location, "
+    "press cmd+s instead. "
+    "If the user asks to close a file, press cmd+w to close only that document's window — "
+    "never cmd+q, which quits the whole app and closes every other open document too."
 )
 
 
@@ -70,6 +85,15 @@ class AgentRuntime:
         self._opener = opener
 
     def run(self, goal: str, cancel_check: Callable[[], bool] | None = None) -> AgentResult:
+        """Drive the tool-calling loop until the model calls `finish`, answers with no
+        tool calls, or a stop condition (cancel/timeout/max_steps/provider error) fires.
+
+        Each iteration: send the full message history + tool schemas to the provider,
+        run any tool calls it asks for, append their results back into the history, repeat.
+        `messages` is the actual conversation state the model sees — every append here
+        is permanent context for the rest of the run, which is why screenshots get
+        trimmed down to the latest one instead of just accumulating.
+        """
         task_id = str(uuid.uuid4())
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -114,6 +138,24 @@ class AgentRuntime:
                 result = self._executor.execute(tool_call.id, tool_call.name, tool_call.arguments)
                 actions.append(ActionSummary(tool_call.name, tool_call.arguments, result.content, result.is_error))
                 messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result.content})
+                if result.image_base64:
+                    # Every step resends the full message list, so old screenshots left in
+                    # place would compound request size/latency step after step. Only the
+                    # latest one is ever useful — drop earlier ones down to a text stub.
+                    for old_message in messages:
+                        if old_message.get("role") == "user" and isinstance(old_message.get("content"), list):
+                            old_message["content"] = "[earlier screenshot omitted]"
+                    # Groq tool-role messages are text-only — the screenshot rides in as
+                    # its own user message right after so the model can see it next turn.
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Screenshot from the screenshot tool call above:"},
+                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{result.image_base64}"}},
+                            ],
+                        }
+                    )
 
                 if tool_call.name == "finish" and not result.is_error:
                     payload = json.loads(result.content)

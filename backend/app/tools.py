@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
@@ -63,6 +64,19 @@ class WaitParams(BaseModel):
 class FinishParams(BaseModel):
     result: str
     success: bool = True
+
+
+def _make_screenshot(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, EmptyParams)
+        png_bytes = env.active.screenshot()
+        # "_image_base64" is stripped out by ToolExecutor before the JSON tool-result
+        # message is built — it rides along on ToolResult.image_base64 instead, so the
+        # agent loop can attach it as an image_url block on a separate user message
+        # (a Groq tool-role message must be plain text).
+        return {"screenshot": "captured", "_image_base64": base64.b64encode(png_bytes).decode("ascii")}
+
+    return handler
 
 
 def _make_get_text(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
@@ -203,6 +217,7 @@ class ToolResult:
     name: str
     content: str
     is_error: bool = False
+    image_base64: str | None = None
 
 
 class ToolExecutor:
@@ -239,7 +254,8 @@ class ToolExecutor:
             logger.warning("tool %s failed: %s", name, exc)
             return ToolResult(tool_call_id, name, f"tool execution failed: {exc}", is_error=True)
 
-        return ToolResult(tool_call_id, name, json.dumps(output))
+        image_base64 = output.pop("_image_base64", None)
+        return ToolResult(tool_call_id, name, json.dumps(output), image_base64=image_base64)
 
 
 def default_registry(env: ComputerEnvironment) -> ToolRegistry:
@@ -247,6 +263,7 @@ def default_registry(env: ComputerEnvironment) -> ToolRegistry:
     # the permission system (phase 18) once file-op and account-changing tools exist.
     registry = ToolRegistry()
     for tool in (
+        Tool("screenshot", "Capture a screenshot of the current screen so you can see it.", EmptyParams, ToolRiskLevel.LOW, _make_screenshot(env)),
         Tool("get_text", "Read the visible text of the current page/window.", EmptyParams, ToolRiskLevel.LOW, _make_get_text(env)),
         Tool("open_url", "Navigate the browser to a URL.", OpenUrlParams, ToolRiskLevel.LOW, _make_open_url(env)),
         Tool("open_application", "Open a native application by name.", ApplicationParams, ToolRiskLevel.LOW, _make_open_application(env)),

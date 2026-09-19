@@ -13,7 +13,9 @@ import groq
 logger = logging.getLogger("rove.providers")
 
 DEFAULT_MODEL = "openai/gpt-oss-120b"
-DEFAULT_TIMEOUT = 30.0
+# ponytail: flat constant. Vision completions (image tokens) run slower than text-only —
+# raise further if screenshot-heavy runs still hit APITimeoutError.
+DEFAULT_TIMEOUT = 60.0
 DEFAULT_MAX_RETRIES = 2
 
 

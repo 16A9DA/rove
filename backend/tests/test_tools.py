@@ -100,7 +100,7 @@ def _registry():
 def test_registry_lists_all_initial_tools() -> None:
     names = {tool.name for tool in _registry().list()}
     assert names == {
-        "get_text", "open_url", "open_application", "focus_application",
+        "screenshot", "get_text", "open_url", "open_application", "focus_application",
         "click", "type", "scroll", "keypress", "wait", "finish",
     }
 
@@ -201,6 +201,18 @@ def test_get_text_returns_text_from_active_controller() -> None:
 
     assert not result.is_error
     assert json.loads(result.content)["text"] == "fake browser page text"
+
+
+def test_screenshot_strips_image_onto_toolresult_not_content() -> None:
+    env = _env()
+    env.open_url("http://example.com")
+
+    result = ToolExecutor(default_registry(env)).execute("id1", "screenshot", "{}")
+
+    assert not result.is_error
+    assert result.image_base64 == "ZmFrZS1icm93c2VyLXBuZw=="  # b"fake-browser-png"
+    assert "_image_base64" not in result.content
+    assert json.loads(result.content) == {"screenshot": "captured"}
 
 
 def test_executor_turns_notimplementederror_into_error_result() -> None:

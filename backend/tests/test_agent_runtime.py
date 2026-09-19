@@ -156,6 +156,26 @@ def test_run_does_not_open_browser_when_native_only() -> None:
     assert opened == []
 
 
+def test_run_feeds_screenshot_back_as_image_message() -> None:
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="screenshot", arguments="{}")]),
+            LLMResponse(content=None, tool_calls=[ToolCall(id="2", name="finish", arguments=json.dumps({"result": "saw it"}))]),
+        ]
+    )
+    runtime = AgentRuntime(provider, environment=_env())
+
+    result = runtime.run("look at the screen")
+
+    assert result.success
+    image_messages = [m for m in provider.calls[1][0] if m["role"] == "user" and isinstance(m["content"], list)]
+    assert len(image_messages) == 1
+    assert image_messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    # the tool-role message itself must stay plain text — no image blocks smuggled in there
+    tool_message = next(m for m in provider.calls[1][0] if m["role"] == "tool")
+    assert isinstance(tool_message["content"], str)
+
+
 def test_action_history_never_carries_raw_provider_content() -> None:
     provider = ScriptedProvider(
         [
