@@ -26,7 +26,9 @@ class MemoryService:
     one writer keeps it simple, no sync between multiple write paths."""
 
     def __init__(self, db_path: Path | str = DEFAULT_DB_PATH) -> None:
-        self._conn = sqlite3.connect(db_path)
+        # check_same_thread=False: this instance is a singleton reused across
+        # FastAPI's threadpool, where each request can land on a different thread.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS memories ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "

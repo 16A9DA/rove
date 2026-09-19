@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Chat } from "@/components/Chat";
 import { Settings } from "@/components/Settings";
 import { Sidebar } from "@/components/Sidebar";
+import { ROVE_API_BASE } from "@/lib/roveApi";
 import type { AgentState, Message, Task } from "@/types/task";
 
 type View = "chat" | "settings";
@@ -46,9 +47,7 @@ export function AppShell() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
-  const handleSend = (text: string) => {
-    if (agentState === "thinking" || agentState === "executing") return;
-
+  const beginTurn = (text: string): string => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -73,16 +72,68 @@ export function AppShell() {
     }
 
     setAgentState("thinking");
+    return taskId;
+  };
 
+  const finishTurn = (taskId: string, agentMessage: Message, status: Task["status"]) => {
+    setMessages((prev) => [...prev, agentMessage]);
+    setAgentState(status === "error" ? "error" : "complete");
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
+  };
+
+  const handleSend = (text: string) => {
+    if (agentState === "thinking" || agentState === "executing") return;
+
+    const taskId = beginTurn(text);
     simulateAgentRun(
       text,
       () => setAgentState("executing"),
-      (agentMessage, status) => {
-        setMessages((prev) => [...prev, agentMessage]);
-        setAgentState(status === "error" ? "error" : "complete");
-        setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
-      },
+      (agentMessage, status) => finishTurn(taskId, agentMessage, status),
     );
+  };
+
+  // Voice commands skip the simulated loop and hit the real orchestrator —
+  // Phase 14 connects Moonshine's transcript straight through to the agent
+  // running on the real computer, unlike typed messages (still simulated
+  // until the rest of the chat loop is wired up).
+  const handleVoiceCommand = async (text: string) => {
+    if (agentState === "thinking" || agentState === "executing") return;
+
+    const taskId = beginTurn(text);
+    setAgentState("executing");
+
+    try {
+      const response = await fetch(`${ROVE_API_BASE}/api/agent/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal: text }),
+      });
+      const body = await response.json();
+      const isError = !response.ok || !body.success;
+      finishTurn(
+        taskId,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          content: isError ? (body.detail ?? body.error ?? "Ran into a problem completing that task.") : (body.final_message ?? "Done."),
+          isError,
+          createdAt: Date.now(),
+        },
+        isError ? "error" : "complete",
+      );
+    } catch (error) {
+      finishTurn(
+        taskId,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          content: error instanceof Error ? error.message : "Could not reach Rove backend.",
+          isError: true,
+          createdAt: Date.now(),
+        },
+        "error",
+      );
+    }
   };
 
   const handleNewTask = () => {
@@ -113,7 +164,7 @@ export function AppShell() {
 
       <main className="flex-1 overflow-hidden">
         {view === "chat" ? (
-          <Chat messages={messages} agentState={agentState} onSend={handleSend} />
+          <Chat messages={messages} agentState={agentState} onSend={handleSend} onVoiceCommand={handleVoiceCommand} />
         ) : (
           <Settings onClose={() => setView("chat")} />
         )}

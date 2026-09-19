@@ -9,10 +9,12 @@ export function Chat({
   messages,
   agentState,
   onSend,
+  onVoiceCommand,
 }: {
   messages: Message[];
   agentState: AgentState;
   onSend: (text: string) => void;
+  onVoiceCommand: (text: string) => void;
 }) {
   const inputDisabled = agentState === "thinking" || agentState === "executing";
 
@@ -25,7 +27,7 @@ export function Chat({
 
       <MessageList messages={messages} agentState={agentState} onExampleClick={onSend} />
 
-      <MessageInput disabled={inputDisabled} onSend={onSend} />
+      <MessageInput disabled={inputDisabled} onSend={onSend} onVoiceCommand={onVoiceCommand} />
     </div>
   );
 }

@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, type KeyboardEvent } from "react";
-
-const ROVE_API_BASE = "http://127.0.0.1:8000";
+import { ROVE_API_BASE } from "@/lib/roveApi";
 
 export function MessageInput({
   disabled,
   onSend,
+  onVoiceCommand,
 }: {
   disabled: boolean;
   onSend: (text: string) => void;
+  onVoiceCommand: (text: string) => void;
 }) {
   const [value, setValue] = useState("");
   const [listening, setListening] = useState(false);
@@ -43,7 +44,7 @@ export function MessageInput({
       const response = await fetch(`${ROVE_API_BASE}/api/stt/stop`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail ?? "could not transcribe");
       const { transcript } = (await response.json()) as { transcript: string };
-      if (transcript) setValue((current) => (current ? `${current} ${transcript}` : transcript));
+      if (transcript) onVoiceCommand(transcript);
     } catch (error) {
       setListening(false);
       setMicError(error instanceof Error ? error.message : "microphone error");
