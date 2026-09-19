@@ -16,13 +16,20 @@ logger = logging.getLogger("rove.agent")
 
 DEFAULT_MAX_STEPS = 20
 DEFAULT_TIMEOUT_SECONDS = 120.0
+# malformed-request (400) responses from the provider are usually a one-off tool-call
+# parse failure on the model's side, not a bad request on ours — worth one retry before
+# giving up. Other status codes (auth, rate-limit, timeout) are not retried here.
+PARSE_FAILURE_RETRY_ATTEMPTS = 1
 
 SYSTEM_PROMPT = (
     "You are Rove, an AI that operates the user's computer through the available tools. "
     "Use tools to accomplish the user's goal, then call finish with the result. "
-    "You cannot see screenshots — use get_text to read what is on screen. "
+    "Use get_text to read what is on screen — you have no way to see screenshots. "
     "Interact like a person would: navigate to a page, type into its focused input, "
-    "then press Return to submit, rather than building search/query URLs by hand."
+    "then press Return to submit, rather than building search/query URLs by hand. "
+    "Opening an application does not guarantee an editable document is focused — "
+    "if typing needs a document (e.g. a text editor), create/focus one first "
+    "(e.g. a New Document keypress) before typing into it."
 )
 
 
@@ -77,11 +84,16 @@ class AgentRuntime:
             if time.monotonic() > deadline:
                 return AgentResult(task_id, False, None, actions, error="timed out")
 
-            try:
-                response = self._provider.complete(messages, tools=self._registry.to_groq_tools())
-            except LLMProviderError as exc:
-                logger.warning("agent step %d: provider error: %s", step, exc)
-                return AgentResult(task_id, False, None, actions, error=str(exc))
+            response = None
+            for attempt in range(PARSE_FAILURE_RETRY_ATTEMPTS + 1):
+                try:
+                    response = self._provider.complete(messages, tools=self._registry.to_groq_tools())
+                    break
+                except LLMProviderError as exc:
+                    logger.warning("agent step %d attempt %d: provider error: %s", step, attempt, exc)
+                    if exc.status_code != 400 or attempt == PARSE_FAILURE_RETRY_ATTEMPTS:
+                        return AgentResult(task_id, False, None, actions, error=str(exc))
+            assert response is not None
 
             if not response.tool_calls:
                 # model answered directly instead of calling finish — treat as done

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import time
@@ -64,15 +63,6 @@ class WaitParams(BaseModel):
 class FinishParams(BaseModel):
     result: str
     success: bool = True
-
-
-def _make_screenshot(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
-    def handler(params: BaseModel) -> dict[str, Any]:
-        assert isinstance(params, EmptyParams)
-        png_bytes = env.active.screenshot()
-        return {"screenshot_base64": base64.b64encode(png_bytes).decode("ascii")}
-
-    return handler
 
 
 def _make_get_text(env: ComputerEnvironment) -> Callable[[BaseModel], dict[str, Any]]:
@@ -257,8 +247,7 @@ def default_registry(env: ComputerEnvironment) -> ToolRegistry:
     # the permission system (phase 18) once file-op and account-changing tools exist.
     registry = ToolRegistry()
     for tool in (
-        Tool("screenshot", "Capture the current screen state.", EmptyParams, ToolRiskLevel.LOW, _make_screenshot(env)),
-        Tool("get_text", "Read the visible text of the current page/window (use this to observe results, not screenshot).", EmptyParams, ToolRiskLevel.LOW, _make_get_text(env)),
+        Tool("get_text", "Read the visible text of the current page/window.", EmptyParams, ToolRiskLevel.LOW, _make_get_text(env)),
         Tool("open_url", "Navigate the browser to a URL.", OpenUrlParams, ToolRiskLevel.LOW, _make_open_url(env)),
         Tool("open_application", "Open a native application by name.", ApplicationParams, ToolRiskLevel.LOW, _make_open_application(env)),
         Tool("focus_application", "Bring an already-open application to the foreground.", ApplicationParams, ToolRiskLevel.LOW, _make_focus_application(env)),

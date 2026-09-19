@@ -50,6 +50,45 @@ def test_run_returns_direct_answer_when_model_calls_no_tool() -> None:
     assert result.actions == []
 
 
+def test_run_retries_once_on_parse_failure_then_succeeds() -> None:
+    class FlakyProvider:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def complete(self, messages, tools=None):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise LLMProviderError("malformed request to Groq", status_code=400)
+            return LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="finish", arguments=json.dumps({"result": "done"}))])
+
+    provider = FlakyProvider()
+    runtime = AgentRuntime(provider, environment=_env())
+
+    result = runtime.run("do something")
+
+    assert result.success
+    assert result.final_message == "done"
+    assert provider.call_count == 2
+
+
+def test_run_does_not_retry_non_parse_failure_errors() -> None:
+    class FlakyProvider:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def complete(self, messages, tools=None):
+            self.call_count += 1
+            raise LLMProviderError("invalid Groq credentials", status_code=401)
+
+    provider = FlakyProvider()
+    runtime = AgentRuntime(provider, environment=_env())
+
+    result = runtime.run("do something")
+
+    assert not result.success
+    assert provider.call_count == 1
+
+
 def test_run_stops_on_provider_error() -> None:
     class FailingProvider:
         def complete(self, messages, tools=None):

@@ -1,4 +1,3 @@
-import base64
 import json
 
 from app.controllers import ComputerController
@@ -101,7 +100,7 @@ def _registry():
 def test_registry_lists_all_initial_tools() -> None:
     names = {tool.name for tool in _registry().list()}
     assert names == {
-        "screenshot", "get_text", "open_url", "open_application", "focus_application",
+        "get_text", "open_url", "open_application", "focus_application",
         "click", "type", "scroll", "keypress", "wait", "finish",
     }
 
@@ -192,15 +191,6 @@ def test_click_targets_active_controller() -> None:
     assert not result.is_error
     assert ("click", (5, 6)) in env.browser.calls
     assert not env.native.calls
-
-
-def test_screenshot_returns_base64_from_active_controller() -> None:
-    env = _env()
-    result = ToolExecutor(default_registry(env)).execute("id1", "screenshot", "{}")
-
-    assert not result.is_error
-    payload = json.loads(result.content)
-    assert base64.b64decode(payload["screenshot_base64"]) == b"fake-native-png"
 
 
 def test_get_text_returns_text_from_active_controller() -> None:
