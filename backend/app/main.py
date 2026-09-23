@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 from app.agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
 from app.memory import MemoryService
-from app.providers import LLMProvider, LLMProviderError, GroqProvider
+from app.providers import AnthropicProvider, LLMProvider, LLMProviderError
 from app.schemas import (
     ActionSummaryResponse,
     AgentMessageRequest,
@@ -38,7 +38,7 @@ def health() -> dict[str, str]:
 @lru_cache
 def get_provider() -> LLMProvider:
     try:
-        return GroqProvider()
+        return AnthropicProvider()
     except LLMProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 

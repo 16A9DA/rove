@@ -60,8 +60,8 @@ class Tool:
     handler: Callable[[BaseModel], dict[str, Any]]
 
     def to_schema(self) -> dict[str, Any]:
-        # Matches the OpenAI/Groq function-calling tool format, so this can be
-        # passed straight into GroqProvider.complete(tools=...).
+        # OpenAI function-calling tool shape; AnthropicProvider translates it internally
+        # (see _to_anthropic_tools in app/providers.py).
         return {
             "type": "function",
             "function": {
@@ -85,7 +85,7 @@ class ToolRegistry:
     def list(self) -> list[Tool]:
         return list(self._tools.values())
 
-    def to_groq_tools(self) -> list[dict[str, Any]]:
+    def to_openai_tools(self) -> list[dict[str, Any]]:
         return [tool.to_schema() for tool in self._tools.values()]
 
 

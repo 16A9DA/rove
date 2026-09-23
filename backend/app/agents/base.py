@@ -92,7 +92,7 @@ class AgentRuntime:
             response = None
             for attempt in range(STEP_RETRY_ATTEMPTS + 1):
                 try:
-                    response = self._provider.complete(messages, tools=self._registry.to_groq_tools())
+                    response = self._provider.complete(messages, tools=self._registry.to_openai_tools())
                     break
                 except LLMProviderError as exc:
                     logger.warning("agent step %d attempt %d: provider error: %s", step, attempt, exc)
@@ -128,7 +128,7 @@ class AgentRuntime:
                     for old_message in messages:
                         if old_message.get("role") == "user" and isinstance(old_message.get("content"), list):
                             old_message["content"] = "[earlier screenshot omitted]"
-                    # Groq tool-role messages are text-only — the screenshot rides in as its
+                    # A tool-role message is text-only — the screenshot rides in as its
                     # own user message right after so the model can see it next turn.
                     messages.append(
                         {

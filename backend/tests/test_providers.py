@@ -3,29 +3,24 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from app.providers import GroqProvider, LLMProviderError
+from app.providers import AnthropicProvider, LLMProviderError
 
-REQUEST = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
-
-
-def _status_error(cls, status_code: int):
-    response = httpx.Response(status_code, request=REQUEST, json={"error": {"message": "boom"}})
-    return cls("boom", response=response, body=None)
+REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
 
 
-def _make_provider() -> GroqProvider:
-    provider = GroqProvider(api_key="test-key")
+def _response(status_code: int, json: dict) -> httpx.Response:
+    return httpx.Response(status_code, request=REQUEST, json=json)
+
+
+def _make_provider() -> AnthropicProvider:
+    provider = AnthropicProvider(api_key="test-key")
     provider._client = MagicMock()
     return provider
 
 
 def test_complete_success() -> None:
-    import groq
-
     provider = _make_provider()
-    completion = MagicMock()
-    completion.choices = [MagicMock(message=MagicMock(content="hi", tool_calls=None))]
-    provider._client.chat.completions.create.return_value = completion
+    provider._client.post.return_value = _response(200, {"content": [{"type": "text", "text": "hi"}]})
 
     result = provider.complete([{"role": "user", "content": "hello"}])
 
@@ -34,10 +29,8 @@ def test_complete_success() -> None:
 
 
 def test_complete_invalid_credentials() -> None:
-    import groq
-
     provider = _make_provider()
-    provider._client.chat.completions.create.side_effect = _status_error(groq.AuthenticationError, 401)
+    provider._client.post.return_value = _response(401, {"error": {"message": "boom"}})
 
     with pytest.raises(LLMProviderError) as exc:
         provider.complete([{"role": "user", "content": "hi"}])
@@ -45,10 +38,8 @@ def test_complete_invalid_credentials() -> None:
 
 
 def test_complete_timeout() -> None:
-    import groq
-
     provider = _make_provider()
-    provider._client.chat.completions.create.side_effect = groq.APITimeoutError(request=REQUEST)
+    provider._client.post.side_effect = httpx.TimeoutException("timed out", request=REQUEST)
 
     with pytest.raises(LLMProviderError) as exc:
         provider.complete([{"role": "user", "content": "hi"}])
@@ -57,9 +48,7 @@ def test_complete_timeout() -> None:
 
 def test_complete_malformed_response() -> None:
     provider = _make_provider()
-    completion = MagicMock()
-    completion.choices = []
-    provider._client.chat.completions.create.return_value = completion
+    provider._client.post.return_value = _response(200, {"unexpected": "shape"})
 
     with pytest.raises(LLMProviderError) as exc:
         provider.complete([{"role": "user", "content": "hi"}])
@@ -67,10 +56,8 @@ def test_complete_malformed_response() -> None:
 
 
 def test_complete_provider_failure() -> None:
-    import groq
-
     provider = _make_provider()
-    provider._client.chat.completions.create.side_effect = _status_error(groq.InternalServerError, 500)
+    provider._client.post.return_value = _response(500, {"error": {"message": "boom"}})
 
     with pytest.raises(LLMProviderError) as exc:
         provider.complete([{"role": "user", "content": "hi"}])

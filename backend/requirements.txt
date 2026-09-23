@@ -2,7 +2,6 @@ fastapi
 uvicorn[standard]
 pydantic
 python-dotenv
-groq
 playwright
 pyobjc-framework-Quartz
 pyobjc-framework-Cocoa

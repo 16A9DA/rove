@@ -10,8 +10,8 @@ def _registry() -> ToolRegistry:
     return registry
 
 
-def test_to_groq_tools_shape() -> None:
-    schemas = _registry().to_groq_tools()
+def test_to_openai_tools_shape() -> None:
+    schemas = _registry().to_openai_tools()
     assert all(s["type"] == "function" for s in schemas)
     assert all("parameters" in s["function"] for s in schemas)
 
