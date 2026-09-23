@@ -164,7 +164,7 @@ def test_run_feeds_screenshot_back_as_image_message() -> None:
     assert result.success
     image_messages = [m for m in provider.calls[1][0] if m["role"] == "user" and isinstance(m["content"], list)]
     assert len(image_messages) == 1
-    assert image_messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert image_messages[0]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
     # the tool-role message itself must stay plain text — no image blocks smuggled in there
     tool_message = next(m for m in provider.calls[1][0] if m["role"] == "tool")
     assert isinstance(tool_message["content"], str)

@@ -52,8 +52,8 @@ def _make_focus_application(native: ComputerController) -> Callable[[BaseModel],
 def _make_screenshot(native: ComputerController) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, EmptyParams)
-        png_bytes = native.screenshot()
-        return {"screenshot": "captured", "_image_base64": base64.b64encode(png_bytes).decode("ascii")}
+        jpeg_bytes = native.screenshot()
+        return {"screenshot": "captured", "_image_base64": base64.b64encode(jpeg_bytes).decode("ascii")}
 
     return handler
 

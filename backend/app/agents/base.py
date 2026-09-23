@@ -17,10 +17,12 @@ DEFAULT_MAX_STEPS = 20
 # inference) run noticeably slower than text-only steps — raise further if screenshot-heavy
 # goals still time out, or make this model-aware if that becomes common.
 DEFAULT_TIMEOUT_SECONDS = 240.0
-# malformed-request (400) responses from the provider are usually a one-off tool-call
-# parse failure on the model's side, not a bad request on ours — worth one retry before
-# giving up. Other status codes (auth, rate-limit, timeout) are not retried here.
-PARSE_FAILURE_RETRY_ATTEMPTS = 1
+# Retried once each: 400 is usually a one-off tool-call parse failure on the model's
+# side; 429/503 are transient rate-limit/overload that can clear within a step. 401/504/
+# other 502s are not retried here — they're not going to resolve within one agent step.
+STEP_RETRY_ATTEMPTS = 1
+RETRYABLE_STATUS_CODES = {400, 429, 503}
+STEP_RETRY_BACKOFF_SECONDS = 2.0
 
 
 @dataclass
@@ -88,14 +90,16 @@ class AgentRuntime:
                 return AgentResult(task_id, False, None, actions, error="timed out")
 
             response = None
-            for attempt in range(PARSE_FAILURE_RETRY_ATTEMPTS + 1):
+            for attempt in range(STEP_RETRY_ATTEMPTS + 1):
                 try:
                     response = self._provider.complete(messages, tools=self._registry.to_groq_tools())
                     break
                 except LLMProviderError as exc:
                     logger.warning("agent step %d attempt %d: provider error: %s", step, attempt, exc)
-                    if exc.status_code != 400 or attempt == PARSE_FAILURE_RETRY_ATTEMPTS:
+                    if exc.status_code not in RETRYABLE_STATUS_CODES or attempt == STEP_RETRY_ATTEMPTS:
                         return AgentResult(task_id, False, None, actions, error=str(exc))
+                    if exc.status_code != 400:
+                        time.sleep(STEP_RETRY_BACKOFF_SECONDS)
             assert response is not None
 
             if not response.tool_calls:
@@ -124,14 +128,14 @@ class AgentRuntime:
                     for old_message in messages:
                         if old_message.get("role") == "user" and isinstance(old_message.get("content"), list):
                             old_message["content"] = "[earlier screenshot omitted]"
-                    # Groq tool-role messages are text-only — the screenshot rides in as
-                    # its own user message right after so the model can see it next turn.
+                    # Groq tool-role messages are text-only — the screenshot rides in as its
+                    # own user message right after so the model can see it next turn.
                     messages.append(
                         {
                             "role": "user",
                             "content": [
                                 {"type": "text", "text": "Screenshot from the screenshot tool call above:"},
-                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{result.image_base64}"}},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{result.image_base64}"}},
                             ],
                         }
                     )

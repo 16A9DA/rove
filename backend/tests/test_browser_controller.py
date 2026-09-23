@@ -32,13 +32,15 @@ def test_navigate_sets_url_and_title(controller, page_url) -> None:
 
 
 def test_click_then_type_reaches_focused_input(controller, page_url) -> None:
+    # Playwright's sync API is thread-affine — any direct .page access from the test
+    # thread has to go through the controller's own dedicated thread via _run.
     controller.navigate(page_url)
-    box = controller.page.locator("#box").bounding_box()
+    box = controller._run(lambda: controller.page.locator("#box").bounding_box())
     controller.click(int(box["x"] + box["width"] / 2), int(box["y"] + box["height"] / 2))
 
     controller.type("hello rove")
 
-    assert controller.page.locator("#box").input_value() == "hello rove"
+    assert controller._run(lambda: controller.page.locator("#box").input_value()) == "hello rove"
 
 
 def test_scroll_and_keypress_do_not_raise(controller, page_url) -> None:
@@ -52,10 +54,10 @@ def test_wait_blocks_for_roughly_the_given_duration(controller, page_url) -> Non
     controller.wait(0.1)
 
 
-def test_screenshot_returns_png_bytes(controller, page_url) -> None:
+def test_screenshot_returns_jpeg_bytes(controller, page_url) -> None:
     controller.navigate(page_url)
     data = controller.screenshot()
-    assert data.startswith(b"\x89PNG")
+    assert data.startswith(b"\xff\xd8")
 
 
 def test_get_active_application_reflects_launch_state() -> None:
@@ -75,10 +77,13 @@ def test_open_and_focus_application_not_supported(controller) -> None:
         controller.focus_application("Finder")
 
 
-def test_using_controller_before_launch_raises() -> None:
+def test_using_controller_before_launch_auto_launches() -> None:
     controller = BrowserController(headless=True)
-    with pytest.raises(RuntimeError):
+    try:
         controller.navigate("about:blank")
+        assert controller.is_launched
+    finally:
+        controller.close()
 
 
 @pytest.mark.parametrize(

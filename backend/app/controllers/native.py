@@ -5,8 +5,9 @@ import time
 import Quartz
 from AppKit import NSApplicationActivateIgnoringOtherApps, NSWorkspace
 
-FOCUS_TIMEOUT_SECONDS = 1.0
+FOCUS_TIMEOUT_SECONDS = 3.0
 FOCUS_POLL_INTERVAL_SECONDS = 0.05
+SCREENSHOT_JPEG_QUALITY = 0.7
 
 from app.controllers.base import ComputerController
 
@@ -76,10 +77,28 @@ class NativeComputerController(ComputerController):
         if image is None:
             raise RuntimeError("screenshot failed — check Screen Recording permission")
 
-        from AppKit import NSBitmapImageRep, NSPNGFileType
+        from Foundation import NSMutableData
 
-        rep = NSBitmapImageRep.alloc().initWithCGImage_(image)
-        data = rep.representationUsingType_properties_(NSPNGFileType, None)
+        # CGWindowListCreateImage captures at retina backing resolution (e.g. 2x), but
+        # click()/scroll() operate in logical display points — sending the raw retina
+        # image means the model's on-screen coordinate guesses are 2x too large, and at
+        # ~7000 image tokens it alone can exceed a provider's per-minute token budget.
+        # Redraw at the logical display size (matching click()'s coordinate space) and
+        # encode as JPEG, which is ~5x smaller than PNG at this resolution.
+        display = Quartz.CGMainDisplayID()
+        width, height = Quartz.CGDisplayPixelsWide(display), Quartz.CGDisplayPixelsHigh(display)
+        color_space = Quartz.CGColorSpaceCreateDeviceRGB()
+        context = Quartz.CGBitmapContextCreate(None, width, height, 8, 0, color_space, Quartz.kCGImageAlphaNoneSkipLast)
+        Quartz.CGContextSetInterpolationQuality(context, Quartz.kCGInterpolationHigh)
+        Quartz.CGContextDrawImage(context, Quartz.CGRectMake(0, 0, width, height), image)
+        scaled = Quartz.CGBitmapContextCreateImage(context)
+
+        data = NSMutableData.data()
+        destination = Quartz.CGImageDestinationCreateWithData(data, "public.jpeg", 1, None)
+        Quartz.CGImageDestinationAddImage(
+            destination, scaled, {Quartz.kCGImageDestinationLossyCompressionQuality: SCREENSHOT_JPEG_QUALITY}
+        )
+        Quartz.CGImageDestinationFinalize(destination)
         return bytes(data)
 
     def click(self, x: int, y: int) -> None:
@@ -130,11 +149,14 @@ class NativeComputerController(ComputerController):
     def focus_application(self, name: str) -> None:
         for app in NSWorkspace.sharedWorkspace().runningApplications():
             if app.localizedName() == name:
-                app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
-                # activateWithOptions_ is async — without this, click/type/keypress can
-                # fire before macOS actually switches focus and hit the wrong window.
+                # activateWithOptions_ is async and can be dropped/deferred (e.g. an app
+                # with no open windows) — re-issue it on every poll instead of once, so a
+                # missed activation gets retried rather than just waiting out the deadline.
                 deadline = time.monotonic() + FOCUS_TIMEOUT_SECONDS
-                while time.monotonic() < deadline and self.get_active_application() != name:
+                while True:
+                    app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+                    if self.get_active_application() == name or time.monotonic() >= deadline:
+                        break
                     time.sleep(FOCUS_POLL_INTERVAL_SECONDS)
                 if self.get_active_application() != name:
                     raise RuntimeError(f"{name} did not become frontmost within {FOCUS_TIMEOUT_SECONDS}s")

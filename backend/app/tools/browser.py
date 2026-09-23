@@ -53,12 +53,12 @@ def _make_get_text(browser: BrowserController) -> Callable[[BaseModel], dict[str
 def _make_screenshot(browser: BrowserController) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, EmptyParams)
-        png_bytes = browser.screenshot()
+        jpeg_bytes = browser.screenshot()
         # "_image_base64" is stripped out by ToolExecutor before the JSON tool-result
         # content is built — it rides along on ToolResult.image_base64 instead, so the
         # agent loop can attach it as an image_url block on a separate user message
         # (a Groq tool-role message must be plain text).
-        return {"screenshot": "captured", "_image_base64": base64.b64encode(png_bytes).decode("ascii")}
+        return {"screenshot": "captured", "_image_base64": base64.b64encode(jpeg_bytes).decode("ascii")}
 
     return handler
 
