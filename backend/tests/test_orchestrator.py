@@ -33,8 +33,7 @@ def test_delegate_browser_runs_sub_agent_and_folds_result_back() -> None:
         ]
     )
     browser = FakeBrowserController()
-    opened: list[str] = []
-    runtime = orchestrator_runtime(provider, browser=browser, native=FakeNativeController(), opener=opened.append)
+    runtime = orchestrator_runtime(provider, browser=browser, native=FakeNativeController())
 
     result = runtime.run("open example.com")
 
@@ -44,7 +43,6 @@ def test_delegate_browser_runs_sub_agent_and_folds_result_back() -> None:
     assert not result.actions[0].is_error
     assert json.loads(result.actions[0].result) == {"success": True, "result": "opened it", "error": None}
     assert browser.url == "https://example.com"
-    assert opened == ["https://example.com"]
 
 
 def test_delegate_desktop_runs_sub_agent() -> None:

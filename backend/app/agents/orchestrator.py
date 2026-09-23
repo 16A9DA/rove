@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import webbrowser
 from typing import Any, Callable
 
 from pydantic import BaseModel
@@ -101,7 +100,6 @@ def orchestrator_runtime(
     provider: LLMProvider,
     browser: BrowserController | None = None,
     native: ComputerController | None = None,
-    opener: Callable[[str], object] = webbrowser.open,
     memory: MemoryService | None = None,
 ) -> AgentRuntime:
     # A fresh sub-AgentRuntime (and message history) is built per delegate call, but
@@ -120,12 +118,9 @@ def orchestrator_runtime(
         return f"{prompt}\n\n{remembered}" if remembered else prompt
 
     def build_browser_runtime() -> AgentRuntime:
-        return AgentRuntime(
-            provider,
-            browser_registry(browser),
-            _with_memory(BROWSER_SYSTEM_PROMPT),
-            on_finish=lambda: opener(browser.current_url) if browser.is_launched else None,
-        )
+        # Real headed Chrome (BrowserController) is already visible on screen — no need
+        # to also open the result in the user's separate default browser on finish.
+        return AgentRuntime(provider, browser_registry(browser), _with_memory(BROWSER_SYSTEM_PROMPT))
 
     def build_desktop_runtime() -> AgentRuntime:
         return AgentRuntime(provider, desktop_registry(native), _with_memory(DESKTOP_SYSTEM_PROMPT))
