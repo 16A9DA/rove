@@ -10,6 +10,7 @@ logging.basicConfig(level=logging.INFO)
 
 from app.agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
+from app.keyboard_watcher import QuitKeyWatcher
 from app.memory import MemoryService
 from app.providers import AnthropicProvider, LLMProvider, LLMProviderError
 from app.schemas import (
@@ -74,18 +75,33 @@ def get_memory_service() -> MemoryService:
     return MemoryService()
 
 
+# Not lru_cache'd — a fresh watcher per request, but FastAPI caches it within that one
+# request's dependency graph, so get_orchestrator and agent_run share the same instance.
+def get_quit_watcher(native: NativeComputerController = Depends(get_native_controller)) -> QuitKeyWatcher:
+    return QuitKeyWatcher(native.source_state_id)
+
+
 def get_orchestrator(
     provider: LLMProvider = Depends(get_provider),
     browser: BrowserController = Depends(get_browser_controller),
     native: NativeComputerController = Depends(get_native_controller),
     memory: MemoryService = Depends(get_memory_service),
+    watcher: QuitKeyWatcher = Depends(get_quit_watcher),
 ) -> AgentRuntime:
-    return orchestrator_runtime(provider, browser=browser, native=native, memory=memory)
+    return orchestrator_runtime(provider, browser=browser, native=native, memory=memory, cancel_check=watcher.is_cancelled)
 
 
 @app.post("/api/agent/run", response_model=AgentRunResponse)
-def agent_run(request: AgentRunRequest, runtime: AgentRuntime = Depends(get_orchestrator)) -> AgentRunResponse:
-    result = runtime.run(request.goal)
+def agent_run(
+    request: AgentRunRequest,
+    runtime: AgentRuntime = Depends(get_orchestrator),
+    watcher: QuitKeyWatcher = Depends(get_quit_watcher),
+) -> AgentRunResponse:
+    watcher.start()
+    try:
+        result = runtime.run(request.goal, cancel_check=watcher.is_cancelled)
+    finally:
+        watcher.stop()
     return AgentRunResponse(
         task_id=result.task_id,
         success=result.success,

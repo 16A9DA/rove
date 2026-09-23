@@ -105,3 +105,31 @@ def test_recalled_memory_is_injected_into_orchestrator_and_sub_agent_prompts(tmp
     sub_agent_system_message = provider.calls[1][0]
     assert "likes dark mode" in orchestrator_system_message["content"]
     assert "likes dark mode" in sub_agent_system_message["content"]
+
+
+def test_cancel_check_stops_delegate_sub_agent_before_it_acts() -> None:
+    # Guardrail: a cancel signal (e.g. the physical 'q' key watcher) must reach an
+    # already-running delegate's own sub-agent loop, not just the orchestrator's —
+    # otherwise "stop" only takes effect after the current delegate call fully finishes.
+    calls: list[int] = []
+
+    def cancel_check() -> bool:
+        calls.append(1)
+        return len(calls) > 1
+
+    provider = ScriptedProvider(
+        [
+            LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="delegate_browser", arguments=json.dumps({"subtask": "open example.com"}))]),
+        ]
+    )
+    runtime = orchestrator_runtime(
+        provider, browser=FakeBrowserController(), native=FakeNativeController(), cancel_check=cancel_check
+    )
+
+    result = runtime.run("open example.com", cancel_check=cancel_check)
+
+    assert not result.success
+    assert result.error == "cancelled"
+    # Only the orchestrator's own first step ever reached the provider — the delegate's
+    # sub-agent saw the cancellation before making its own provider.complete() call.
+    assert len(provider.calls) == 1

@@ -68,6 +68,13 @@ class NativeComputerController(ComputerController):
     def __init__(self) -> None:
         self._source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
 
+    @property
+    def source_state_id(self) -> int:
+        # Tags every synthetic event this controller posts, so a global key-watcher
+        # (see app/keyboard_watcher.py) can tell Rove's own keystrokes apart from a
+        # real physical keypress and only cancel on the latter.
+        return Quartz.CGEventSourceGetSourceStateID(self._source)
+
     def screenshot(self) -> bytes:
         # CGWindowListCreateImage is deprecated on macOS 14+ but still works; swap for
         # ScreenCaptureKit if/when Apple removes it.

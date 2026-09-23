@@ -79,10 +79,12 @@ def _delegate_output(result: AgentResult) -> dict[str, Any]:
     }
 
 
-def _make_delegate(build_runtime: Callable[[], AgentRuntime]) -> Callable[[BaseModel], dict[str, Any]]:
+def _make_delegate(
+    build_runtime: Callable[[], AgentRuntime], cancel_check: Callable[[], bool] | None
+) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, SubtaskParams)
-        return _delegate_output(build_runtime().run(params.subtask))
+        return _delegate_output(build_runtime().run(params.subtask, cancel_check=cancel_check))
 
     return handler
 
@@ -101,6 +103,7 @@ def orchestrator_runtime(
     browser: BrowserController | None = None,
     native: ComputerController | None = None,
     memory: MemoryService | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> AgentRuntime:
     # A fresh sub-AgentRuntime (and message history) is built per delegate call, but
     # the underlying controller is shared across the whole task — a browser tab or
@@ -129,9 +132,9 @@ def orchestrator_runtime(
         return AgentRuntime(provider, research_registry(), _with_memory(RESEARCH_SYSTEM_PROMPT))
 
     registry = ToolRegistry()
-    registry.register(Tool("delegate_browser", "Delegate a subtask to the browser specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_browser_runtime)))
-    registry.register(Tool("delegate_desktop", "Delegate a subtask to the native-application specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_desktop_runtime)))
-    registry.register(Tool("delegate_research", "Delegate a subtask to the research specialist agent (reads a URL without a browser).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_research_runtime)))
+    registry.register(Tool("delegate_browser", "Delegate a subtask to the browser specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_browser_runtime, cancel_check)))
+    registry.register(Tool("delegate_desktop", "Delegate a subtask to the native-application specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_desktop_runtime, cancel_check)))
+    registry.register(Tool("delegate_research", "Delegate a subtask to the research specialist agent (reads a URL without a browser).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_research_runtime, cancel_check)))
     registry.register(Tool("remember", "Save something worth recalling on future tasks.", RememberParams, ToolRiskLevel.LOW, _make_remember(memory)))
     registry.register(Tool("finish", "Report the whole goal as complete with a result.", FinishParams, ToolRiskLevel.LOW, finish))
 
