@@ -18,7 +18,7 @@ cd backend && .venv/bin/python -m playwright install chromium
 cd frontend && npm install
 ```
 
-Copy `.env.example` to `.env` and set `GROQ_API_KEY`.
+Copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`.
 
 ## Usage
 
