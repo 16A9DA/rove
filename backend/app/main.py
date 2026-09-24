@@ -8,15 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
+from app import paused_runs
 from app.agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
-from app.keyboard_watcher import QuitKeyWatcher
+from app.keyboard_watcher import InputInterruptWatcher
 from app.memory import MemoryService
 from app.providers import AnthropicProvider, LLMProvider, LLMProviderError
 from app.schemas import (
     ActionSummaryResponse,
     AgentMessageRequest,
     AgentMessageResponse,
+    AgentResumeRequest,
     AgentRunRequest,
     AgentRunResponse,
     ToolCallResponse,
@@ -77,8 +79,8 @@ def get_memory_service() -> MemoryService:
 
 # Not lru_cache'd — a fresh watcher per request, but FastAPI caches it within that one
 # request's dependency graph, so get_orchestrator and agent_run share the same instance.
-def get_quit_watcher(native: NativeComputerController = Depends(get_native_controller)) -> QuitKeyWatcher:
-    return QuitKeyWatcher(native.source_state_id)
+def get_input_watcher(native: NativeComputerController = Depends(get_native_controller)) -> InputInterruptWatcher:
+    return InputInterruptWatcher(native.source_state_id)
 
 
 def get_orchestrator(
@@ -86,22 +88,12 @@ def get_orchestrator(
     browser: BrowserController = Depends(get_browser_controller),
     native: NativeComputerController = Depends(get_native_controller),
     memory: MemoryService = Depends(get_memory_service),
-    watcher: QuitKeyWatcher = Depends(get_quit_watcher),
+    watcher: InputInterruptWatcher = Depends(get_input_watcher),
 ) -> AgentRuntime:
-    return orchestrator_runtime(provider, browser=browser, native=native, memory=memory, cancel_check=watcher.is_cancelled)
+    return orchestrator_runtime(provider, browser=browser, native=native, memory=memory, cancel_check=watcher.is_interrupted)
 
 
-@app.post("/api/agent/run", response_model=AgentRunResponse)
-def agent_run(
-    request: AgentRunRequest,
-    runtime: AgentRuntime = Depends(get_orchestrator),
-    watcher: QuitKeyWatcher = Depends(get_quit_watcher),
-) -> AgentRunResponse:
-    watcher.start()
-    try:
-        result = runtime.run(request.goal, cancel_check=watcher.is_cancelled)
-    finally:
-        watcher.stop()
+def _run_response(result) -> AgentRunResponse:
     return AgentRunResponse(
         task_id=result.task_id,
         success=result.success,
@@ -109,6 +101,37 @@ def agent_run(
         actions=[ActionSummaryResponse(tool_name=a.tool_name, arguments=a.arguments, result=a.result, is_error=a.is_error) for a in result.actions],
         error=result.error,
     )
+
+
+@app.post("/api/agent/run", response_model=AgentRunResponse)
+def agent_run(
+    request: AgentRunRequest,
+    runtime: AgentRuntime = Depends(get_orchestrator),
+    watcher: InputInterruptWatcher = Depends(get_input_watcher),
+) -> AgentRunResponse:
+    watcher.start()
+    try:
+        result = runtime.run(request.goal, cancel_check=watcher.is_interrupted)
+    finally:
+        watcher.stop()
+    return _run_response(result)
+
+
+@app.post("/api/agent/resume", response_model=AgentRunResponse)
+def agent_resume(
+    request: AgentResumeRequest,
+    runtime: AgentRuntime = Depends(get_orchestrator),
+    watcher: InputInterruptWatcher = Depends(get_input_watcher),
+) -> AgentRunResponse:
+    messages = paused_runs.pop(request.task_id)
+    if messages is None:
+        raise HTTPException(status_code=404, detail="no paused run for that task_id")
+    watcher.start()
+    try:
+        result = runtime.run(task_id=request.task_id, resume_messages=messages, cancel_check=watcher.is_interrupted)
+    finally:
+        watcher.stop()
+    return _run_response(result)
 
 
 @lru_cache

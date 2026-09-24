@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from app import paused_runs
 from app.providers import LLMProvider, LLMProviderError
 from app.tools import ToolExecutor, ToolRegistry
 
@@ -65,18 +66,28 @@ class AgentRuntime:
         self._timeout_seconds = timeout_seconds
         self._on_finish = on_finish
 
-    def run(self, goal: str, cancel_check: Callable[[], bool] | None = None) -> AgentResult:
+    def run(
+        self,
+        goal: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        task_id: str | None = None,
+        resume_messages: list[dict[str, Any]] | None = None,
+    ) -> AgentResult:
         """Drive the tool-calling loop until the model calls `finish`, answers with no
-        tool calls, or a stop condition (cancel/timeout/max_steps/provider error) fires.
+        tool calls, or a stop condition (interrupt/timeout/max_steps/provider error) fires.
 
         Each iteration: send the full message history + tool schemas to the provider,
         run any tool calls it asks for, append their results back into the history, repeat.
         `messages` is the actual conversation state the model sees — every append here
         is permanent context for the rest of the run, which is why screenshots get
         trimmed down to the latest one instead of just accumulating.
+
+        `resume_messages`, if given, picks a paused run back up from its saved history
+        instead of starting fresh from `goal` — `task_id` should then be the same id the
+        original paused run returned, so the caller-facing id stays stable across resume.
         """
-        task_id = str(uuid.uuid4())
-        messages: list[dict[str, Any]] = [
+        task_id = task_id or str(uuid.uuid4())
+        messages: list[dict[str, Any]] = resume_messages if resume_messages is not None else [
             {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": goal},
         ]
@@ -85,7 +96,8 @@ class AgentRuntime:
 
         for step in range(self._max_steps):
             if cancel_check is not None and cancel_check():
-                return AgentResult(task_id, False, None, actions, error="cancelled")
+                paused_runs.save(task_id, messages)
+                return AgentResult(task_id, False, None, actions, error="paused")
             if time.monotonic() > deadline:
                 return AgentResult(task_id, False, None, actions, error="timed out")
 

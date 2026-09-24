@@ -113,15 +113,33 @@ def test_run_stops_at_max_steps_without_finish() -> None:
     assert len(result.actions) == 3
 
 
-def test_run_stops_when_cancelled() -> None:
+def test_run_stops_when_interrupted() -> None:
     provider = ScriptedProvider([LLMResponse(content="unreachable", tool_calls=[])])
     runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
 
     result = runtime.run("do something", cancel_check=lambda: True)
 
     assert not result.success
-    assert result.error == "cancelled"
-    assert provider.calls == []  # cancelled before ever calling the provider
+    assert result.error == "paused"
+    assert provider.calls == []  # paused before ever calling the provider
+
+
+def test_run_resumes_from_paused_state() -> None:
+    import app.paused_runs as paused_runs
+
+    provider = ScriptedProvider([LLMResponse(content="unreachable", tool_calls=[])])
+    runtime = AgentRuntime(provider, desktop_registry(FakeNativeController()), SYSTEM_PROMPT)
+
+    paused = runtime.run("open Finder", cancel_check=lambda: True)
+    saved_messages = paused_runs.pop(paused.task_id)
+    assert saved_messages is not None
+
+    provider._responses = [LLMResponse(content=None, tool_calls=[ToolCall(id="1", name="finish", arguments='{"success": true, "result": "done"}')])]
+    resumed = runtime.run(task_id=paused.task_id, resume_messages=saved_messages)
+
+    assert resumed.task_id == paused.task_id
+    assert resumed.success
+    assert resumed.final_message == "done"
 
 
 def test_run_calls_on_finish_after_successful_finish() -> None:

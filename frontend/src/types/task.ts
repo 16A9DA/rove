@@ -4,7 +4,8 @@ export type AgentState =
   | "thinking"
   | "executing"
   | "complete"
-  | "error";
+  | "error"
+  | "paused";
 
 export type MessageRole = "user" | "agent";
 
@@ -16,7 +17,7 @@ export type Message = {
   createdAt: number;
 };
 
-export type TaskStatus = "running" | "complete" | "error";
+export type TaskStatus = "running" | "complete" | "error" | "paused";
 
 export type Task = {
   id: string;

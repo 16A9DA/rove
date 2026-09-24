@@ -7,6 +7,7 @@ const STATUS_COPY: Record<AgentState, string> = {
   executing: "Executing",
   complete: "Done",
   error: "Error",
+  paused: "Paused",
 };
 
 const STATUS_DOT: Record<AgentState, string> = {
@@ -16,6 +17,7 @@ const STATUS_DOT: Record<AgentState, string> = {
   executing: "bg-emerald-400",
   complete: "bg-emerald-400",
   error: "bg-red-400",
+  paused: "bg-amber-400",
 };
 
 export function AgentStatus({ state }: { state: AgentState }) {

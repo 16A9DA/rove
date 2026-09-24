@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app import paused_runs
 from app.agents import ActionSummary, AgentResult
 from app.main import app, get_orchestrator, get_provider
 from app.providers import LLMProviderError, LLMResponse, ToolCall
@@ -65,7 +66,7 @@ class FakeRuntime:
     def __init__(self, result: AgentResult) -> None:
         self._result = result
 
-    def run(self, goal: str, cancel_check=None) -> AgentResult:
+    def run(self, goal: str | None = None, cancel_check=None, task_id: str | None = None, resume_messages=None) -> AgentResult:
         return self._result
 
 
@@ -86,6 +87,23 @@ def test_agent_run_success() -> None:
     assert body["success"] is True
     assert body["final_message"] == "done"
     assert body["actions"][0]["tool_name"] == "finish"
+
+
+def test_agent_resume_success() -> None:
+    paused_runs.save("task-2", [{"role": "system", "content": "..."}])
+    result = AgentResult(task_id="task-2", success=True, final_message="done")
+    app.dependency_overrides[get_orchestrator] = lambda: FakeRuntime(result)
+
+    response = client.post("/api/agent/resume", json={"task_id": "task-2"})
+
+    assert response.status_code == 200
+    assert response.json()["task_id"] == "task-2"
+
+
+def test_agent_resume_unknown_task() -> None:
+    response = client.post("/api/agent/resume", json={"task_id": "no-such-task"})
+
+    assert response.status_code == 404
 
 
 def test_agent_message_provider_failure() -> None:

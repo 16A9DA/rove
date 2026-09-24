@@ -4,6 +4,7 @@ const STATUS_STYLE: Record<Task["status"], string> = {
   running: "bg-amber-400",
   complete: "bg-emerald-400",
   error: "bg-red-400",
+  paused: "bg-amber-400",
 };
 
 export function TaskHistory({

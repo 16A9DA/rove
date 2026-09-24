@@ -46,6 +46,7 @@ export function AppShell() {
   const [agentState, setAgentState] = useState<AgentState>("idle");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [pausedBackendTaskId, setPausedBackendTaskId] = useState<string | null>(null);
 
   const beginTurn = (text: string): string => {
     const userMessage: Message = {
@@ -77,7 +78,7 @@ export function AppShell() {
 
   const finishTurn = (taskId: string, agentMessage: Message, status: Task["status"]) => {
     setMessages((prev) => [...prev, agentMessage]);
-    setAgentState(status === "error" ? "error" : "complete");
+    setAgentState(status === "error" ? "error" : status === "paused" ? "paused" : "complete");
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
   };
 
@@ -96,32 +97,39 @@ export function AppShell() {
   // Phase 14 connects Moonshine's transcript straight through to the agent
   // running on the real computer, unlike typed messages (still simulated
   // until the rest of the chat loop is wired up).
-  const handleVoiceCommand = async (text: string) => {
-    if (agentState === "thinking" || agentState === "executing") return;
-
-    const taskId = beginTurn(text);
+  // Shared by the initial run and a resume — both just POST to a different
+  // endpoint and land the same way: paused (mouse/keyboard touched mid-run,
+  // resumable), done, or errored.
+  const runAgent = async (taskId: string, path: string, body: Record<string, unknown>) => {
     setAgentState("executing");
 
     try {
-      const response = await fetch(`${ROVE_API_BASE}/api/agent/run`, {
+      const response = await fetch(`${ROVE_API_BASE}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal: text }),
+        body: JSON.stringify(body),
       });
-      const body = await response.json();
-      const isError = !response.ok || !body.success;
+      const responseBody = await response.json();
+      const isPaused = response.ok && responseBody.error === "paused";
+      const isError = !response.ok || (!isPaused && !responseBody.success);
+      setPausedBackendTaskId(isPaused ? responseBody.task_id : null);
       finishTurn(
         taskId,
         {
           id: crypto.randomUUID(),
           role: "agent",
-          content: isError ? (body.detail ?? body.error ?? "Ran into a problem completing that task.") : (body.final_message ?? "Done."),
+          content: isPaused
+            ? "Paused — mouse or keyboard touched. Press Continue to resume."
+            : isError
+              ? (responseBody.detail ?? responseBody.error ?? "Ran into a problem completing that task.")
+              : (responseBody.final_message ?? "Done."),
           isError,
           createdAt: Date.now(),
         },
-        isError ? "error" : "complete",
+        isPaused ? "paused" : isError ? "error" : "complete",
       );
     } catch (error) {
+      setPausedBackendTaskId(null);
       finishTurn(
         taskId,
         {
@@ -134,6 +142,19 @@ export function AppShell() {
         "error",
       );
     }
+  };
+
+  const handleVoiceCommand = async (text: string) => {
+    if (agentState === "thinking" || agentState === "executing") return;
+
+    const taskId = beginTurn(text);
+    await runAgent(taskId, "/api/agent/run", { goal: text });
+  };
+
+  const handleResume = async () => {
+    if (!pausedBackendTaskId || !activeTaskId) return;
+    setTasks((prev) => prev.map((t) => (t.id === activeTaskId ? { ...t, status: "running" } : t)));
+    await runAgent(activeTaskId, "/api/agent/resume", { task_id: pausedBackendTaskId });
   };
 
   const handleNewTask = () => {
@@ -164,7 +185,7 @@ export function AppShell() {
 
       <main className="flex-1 overflow-hidden">
         {view === "chat" ? (
-          <Chat messages={messages} agentState={agentState} onSend={handleSend} onVoiceCommand={handleVoiceCommand} />
+          <Chat messages={messages} agentState={agentState} onSend={handleSend} onVoiceCommand={handleVoiceCommand} onResume={handleResume} />
         ) : (
           <Settings onClose={() => setView("chat")} />
         )}

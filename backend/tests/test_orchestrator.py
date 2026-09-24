@@ -108,7 +108,7 @@ def test_recalled_memory_is_injected_into_orchestrator_and_sub_agent_prompts(tmp
 
 
 def test_cancel_check_stops_delegate_sub_agent_before_it_acts() -> None:
-    # Guardrail: a cancel signal (e.g. the physical 'q' key watcher) must reach an
+    # Guardrail: an interrupt signal (e.g. the input watcher) must reach an
     # already-running delegate's own sub-agent loop, not just the orchestrator's —
     # otherwise "stop" only takes effect after the current delegate call fully finishes.
     calls: list[int] = []
@@ -129,7 +129,7 @@ def test_cancel_check_stops_delegate_sub_agent_before_it_acts() -> None:
     result = runtime.run("open example.com", cancel_check=cancel_check)
 
     assert not result.success
-    assert result.error == "cancelled"
+    assert result.error == "paused"
     # Only the orchestrator's own first step ever reached the provider — the delegate's
-    # sub-agent saw the cancellation before making its own provider.complete() call.
+    # sub-agent saw the interrupt before making its own provider.complete() call.
     assert len(provider.calls) == 1

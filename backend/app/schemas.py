@@ -27,6 +27,10 @@ class AgentRunRequest(BaseModel):
     goal: str
 
 
+class AgentResumeRequest(BaseModel):
+    task_id: str
+
+
 class ActionSummaryResponse(BaseModel):
     tool_name: str
     arguments: str
