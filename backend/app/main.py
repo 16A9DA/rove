@@ -11,6 +11,7 @@ logging.basicConfig(level=logging.INFO)
 from app import paused_runs
 from app.agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
+from app.help_request import HelpRequest
 from app.keyboard_watcher import InputInterruptWatcher
 from app.memory import MemoryService
 from app.providers import AnthropicProvider, LLMProvider, LLMProviderError
@@ -83,14 +84,23 @@ def get_input_watcher(native: NativeComputerController = Depends(get_native_cont
     return InputInterruptWatcher(native.source_state_id)
 
 
+# Not lru_cache'd, same reasoning as get_input_watcher — fresh per request/resume so a
+# resolved blocker doesn't stay "pending" forever, but shared within one request's graph.
+def get_help_request() -> HelpRequest:
+    return HelpRequest()
+
+
 def get_orchestrator(
     provider: LLMProvider = Depends(get_provider),
     browser: BrowserController = Depends(get_browser_controller),
     native: NativeComputerController = Depends(get_native_controller),
     memory: MemoryService = Depends(get_memory_service),
     watcher: InputInterruptWatcher = Depends(get_input_watcher),
+    help_request: HelpRequest = Depends(get_help_request),
 ) -> AgentRuntime:
-    return orchestrator_runtime(provider, browser=browser, native=native, memory=memory, cancel_check=watcher.is_interrupted)
+    return orchestrator_runtime(
+        provider, browser=browser, native=native, memory=memory, cancel_check=watcher.is_interrupted, help_request=help_request
+    )
 
 
 def _run_response(result) -> AgentRunResponse:
@@ -100,6 +110,7 @@ def _run_response(result) -> AgentRunResponse:
         final_message=result.final_message,
         actions=[ActionSummaryResponse(tool_name=a.tool_name, arguments=a.arguments, result=a.result, is_error=a.is_error) for a in result.actions],
         error=result.error,
+        question=result.question,
     )
 
 
@@ -108,10 +119,11 @@ def agent_run(
     request: AgentRunRequest,
     runtime: AgentRuntime = Depends(get_orchestrator),
     watcher: InputInterruptWatcher = Depends(get_input_watcher),
+    help_request: HelpRequest = Depends(get_help_request),
 ) -> AgentRunResponse:
     watcher.start()
     try:
-        result = runtime.run(request.goal, cancel_check=watcher.is_interrupted)
+        result = runtime.run(request.goal, cancel_check=watcher.is_interrupted, question_check=help_request.question)
     finally:
         watcher.stop()
     return _run_response(result)
@@ -122,13 +134,16 @@ def agent_resume(
     request: AgentResumeRequest,
     runtime: AgentRuntime = Depends(get_orchestrator),
     watcher: InputInterruptWatcher = Depends(get_input_watcher),
+    help_request: HelpRequest = Depends(get_help_request),
 ) -> AgentRunResponse:
     messages = paused_runs.pop(request.task_id)
     if messages is None:
         raise HTTPException(status_code=404, detail="no paused run for that task_id")
     watcher.start()
     try:
-        result = runtime.run(task_id=request.task_id, resume_messages=messages, cancel_check=watcher.is_interrupted)
+        result = runtime.run(
+            task_id=request.task_id, resume_messages=messages, cancel_check=watcher.is_interrupted, question_check=help_request.question
+        )
     finally:
         watcher.stop()
     return _run_response(result)

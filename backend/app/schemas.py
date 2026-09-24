@@ -44,6 +44,7 @@ class AgentRunResponse(BaseModel):
     final_message: str | None
     actions: list[ActionSummaryResponse]
     error: str | None = None
+    question: str | None = None
 
 
 class TranscribeResponse(BaseModel):

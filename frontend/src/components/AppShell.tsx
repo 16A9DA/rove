@@ -119,7 +119,9 @@ export function AppShell() {
           id: crypto.randomUUID(),
           role: "agent",
           content: isPaused
-            ? "Paused — mouse or keyboard touched. Press Continue to resume."
+            ? responseBody.question
+              ? `Paused — needs your help: ${responseBody.question}`
+              : "Paused — mouse or keyboard touched. Press Continue to resume."
             : isError
               ? (responseBody.detail ?? responseBody.error ?? "Ran into a problem completing that task.")
               : (responseBody.final_message ?? "Done."),

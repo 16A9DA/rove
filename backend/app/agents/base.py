@@ -42,6 +42,7 @@ class AgentResult:
     final_message: str | None
     actions: list[ActionSummary] = field(default_factory=list)
     error: str | None = None
+    question: str | None = None
 
 
 class AgentRuntime:
@@ -72,6 +73,7 @@ class AgentRuntime:
         cancel_check: Callable[[], bool] | None = None,
         task_id: str | None = None,
         resume_messages: list[dict[str, Any]] | None = None,
+        question_check: Callable[[], str | None] | None = None,
     ) -> AgentResult:
         """Drive the tool-calling loop until the model calls `finish`, answers with no
         tool calls, or a stop condition (interrupt/timeout/max_steps/provider error) fires.
@@ -95,9 +97,10 @@ class AgentRuntime:
         deadline = time.monotonic() + self._timeout_seconds
 
         for step in range(self._max_steps):
-            if cancel_check is not None and cancel_check():
+            question = question_check() if question_check is not None else None
+            if question is not None or (cancel_check is not None and cancel_check()):
                 paused_runs.save(task_id, messages)
-                return AgentResult(task_id, False, None, actions, error="paused")
+                return AgentResult(task_id, False, None, actions, error="paused", question=question)
             if time.monotonic() > deadline:
                 return AgentResult(task_id, False, None, actions, error="timed out")
 

@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ValidationError
 
+from app.help_request import HelpRequest
+
 logger = logging.getLogger("rove.tools")
 
 MAX_WAIT_SECONDS = 30.0
@@ -35,6 +37,26 @@ class WaitParams(BaseModel):
 class FinishParams(BaseModel):
     result: str
     success: bool = True
+
+
+class AskForHelpParams(BaseModel):
+    question: str
+
+
+ASK_FOR_HELP_DESCRIPTION = (
+    "Ask the user for help when something blocks you that you can't resolve yourself "
+    "(a CAPTCHA, a login/verification wall, an ambiguous instruction). The run pauses "
+    "here — the user resolves it and resumes you."
+)
+
+
+def make_ask_for_help(help_request: HelpRequest) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, AskForHelpParams)
+        help_request.ask(params.question)
+        return {"asked": params.question}
+
+    return handler
 
 
 def wait(params: BaseModel) -> dict[str, Any]:

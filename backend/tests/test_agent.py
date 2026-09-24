@@ -66,7 +66,7 @@ class FakeRuntime:
     def __init__(self, result: AgentResult) -> None:
         self._result = result
 
-    def run(self, goal: str | None = None, cancel_check=None, task_id: str | None = None, resume_messages=None) -> AgentResult:
+    def run(self, goal: str | None = None, cancel_check=None, task_id: str | None = None, resume_messages=None, question_check=None) -> AgentResult:
         return self._result
 
 

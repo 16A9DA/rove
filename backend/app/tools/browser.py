@@ -6,7 +6,20 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field
 
 from app.controllers.browser import BrowserController
-from app.tools.base import EmptyParams, FinishParams, Tool, ToolRegistry, ToolRiskLevel, WaitParams, finish, wait
+from app.help_request import HelpRequest
+from app.tools.base import (
+    ASK_FOR_HELP_DESCRIPTION,
+    AskForHelpParams,
+    EmptyParams,
+    FinishParams,
+    Tool,
+    ToolRegistry,
+    ToolRiskLevel,
+    WaitParams,
+    finish,
+    make_ask_for_help,
+    wait,
+)
 
 
 class OpenUrlParams(BaseModel):
@@ -99,7 +112,7 @@ def _make_keypress(browser: BrowserController) -> Callable[[BaseModel], dict[str
     return handler
 
 
-def browser_registry(browser: BrowserController) -> ToolRegistry:
+def browser_registry(browser: BrowserController, help_request: HelpRequest) -> ToolRegistry:
     registry = ToolRegistry()
     for tool in (
         Tool("open_url", "Navigate the browser to a URL.", OpenUrlParams, ToolRiskLevel.LOW, _make_open_url(browser)),
@@ -110,6 +123,7 @@ def browser_registry(browser: BrowserController) -> ToolRegistry:
         Tool("scroll", "Scroll the page.", ScrollParams, ToolRiskLevel.LOW, _make_scroll(browser)),
         Tool("keypress", "Send a keyboard shortcut, e.g. 'cmd+t'.", KeypressParams, ToolRiskLevel.LOW, _make_keypress(browser)),
         Tool("wait", "Pause for a short duration.", WaitParams, ToolRiskLevel.LOW, wait),
+        Tool("ask_for_help", ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, ToolRiskLevel.LOW, make_ask_for_help(help_request)),
         Tool("finish", "Report the subtask as complete with a result.", FinishParams, ToolRiskLevel.LOW, finish),
     ):
         registry.register(tool)

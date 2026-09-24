@@ -12,9 +12,22 @@ from app.agents.base import AgentResult, AgentRuntime
 # the orchestrator's entire timeout before it even gets to react to the result.
 ORCHESTRATOR_TIMEOUT_SECONDS = 900.0
 from app.controllers import BrowserController, ComputerController, NativeComputerController
+from app.help_request import HelpRequest
 from app.memory import MemoryCategory, MemoryService
 from app.providers import LLMProvider
-from app.tools import FinishParams, Tool, ToolRegistry, ToolRiskLevel, browser_registry, desktop_registry, finish, research_registry
+from app.tools import (
+    ASK_FOR_HELP_DESCRIPTION,
+    AskForHelpParams,
+    FinishParams,
+    Tool,
+    ToolRegistry,
+    ToolRiskLevel,
+    browser_registry,
+    desktop_registry,
+    finish,
+    make_ask_for_help,
+    research_registry,
+)
 
 ORCHESTRATOR_SYSTEM_PROMPT = (
     "You are Rove's orchestrator. You never touch the screen yourself — break the "
@@ -80,11 +93,15 @@ def _delegate_output(result: AgentResult) -> dict[str, Any]:
 
 
 def _make_delegate(
-    build_runtime: Callable[[], AgentRuntime], cancel_check: Callable[[], bool] | None
+    build_runtime: Callable[[], AgentRuntime],
+    cancel_check: Callable[[], bool] | None,
+    question_check: Callable[[], str | None] | None,
 ) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, SubtaskParams)
-        return _delegate_output(build_runtime().run(params.subtask, cancel_check=cancel_check))
+        return _delegate_output(
+            build_runtime().run(params.subtask, cancel_check=cancel_check, question_check=question_check)
+        )
 
     return handler
 
@@ -104,6 +121,7 @@ def orchestrator_runtime(
     native: ComputerController | None = None,
     memory: MemoryService | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    help_request: HelpRequest | None = None,
 ) -> AgentRuntime:
     # A fresh sub-AgentRuntime (and message history) is built per delegate call, but
     # the underlying controller is shared across the whole task — a browser tab or
@@ -111,6 +129,7 @@ def orchestrator_runtime(
     browser = browser if browser is not None else BrowserController()
     native = native if native is not None else NativeComputerController()
     memory = memory if memory is not None else MemoryService()
+    help_request = help_request if help_request is not None else HelpRequest()
 
     # Recalled once per task (not re-queried per delegate call) and handed down to
     # every agent's own prompt read-only — the orchestrator is the only writer, via
@@ -123,19 +142,20 @@ def orchestrator_runtime(
     def build_browser_runtime() -> AgentRuntime:
         # Real headed Chrome (BrowserController) is already visible on screen — no need
         # to also open the result in the user's separate default browser on finish.
-        return AgentRuntime(provider, browser_registry(browser), _with_memory(BROWSER_SYSTEM_PROMPT))
+        return AgentRuntime(provider, browser_registry(browser, help_request), _with_memory(BROWSER_SYSTEM_PROMPT))
 
     def build_desktop_runtime() -> AgentRuntime:
-        return AgentRuntime(provider, desktop_registry(native), _with_memory(DESKTOP_SYSTEM_PROMPT))
+        return AgentRuntime(provider, desktop_registry(native, help_request), _with_memory(DESKTOP_SYSTEM_PROMPT))
 
     def build_research_runtime() -> AgentRuntime:
-        return AgentRuntime(provider, research_registry(), _with_memory(RESEARCH_SYSTEM_PROMPT))
+        return AgentRuntime(provider, research_registry(help_request), _with_memory(RESEARCH_SYSTEM_PROMPT))
 
     registry = ToolRegistry()
-    registry.register(Tool("delegate_browser", "Delegate a subtask to the browser specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_browser_runtime, cancel_check)))
-    registry.register(Tool("delegate_desktop", "Delegate a subtask to the native-application specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_desktop_runtime, cancel_check)))
-    registry.register(Tool("delegate_research", "Delegate a subtask to the research specialist agent (reads a URL without a browser).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_research_runtime, cancel_check)))
+    registry.register(Tool("delegate_browser", "Delegate a subtask to the browser specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_browser_runtime, cancel_check, help_request.question)))
+    registry.register(Tool("delegate_desktop", "Delegate a subtask to the native-application specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_desktop_runtime, cancel_check, help_request.question)))
+    registry.register(Tool("delegate_research", "Delegate a subtask to the research specialist agent (reads a URL without a browser).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_research_runtime, cancel_check, help_request.question)))
     registry.register(Tool("remember", "Save something worth recalling on future tasks.", RememberParams, ToolRiskLevel.LOW, _make_remember(memory)))
+    registry.register(Tool("ask_for_help", ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, ToolRiskLevel.LOW, make_ask_for_help(help_request)))
     registry.register(Tool("finish", "Report the whole goal as complete with a result.", FinishParams, ToolRiskLevel.LOW, finish))
 
     return AgentRuntime(

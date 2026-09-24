@@ -6,7 +6,20 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field
 
 from app.controllers.base import ComputerController
-from app.tools.base import EmptyParams, FinishParams, Tool, ToolRegistry, ToolRiskLevel, WaitParams, finish, wait
+from app.help_request import HelpRequest
+from app.tools.base import (
+    ASK_FOR_HELP_DESCRIPTION,
+    AskForHelpParams,
+    EmptyParams,
+    FinishParams,
+    Tool,
+    ToolRegistry,
+    ToolRiskLevel,
+    WaitParams,
+    finish,
+    make_ask_for_help,
+    wait,
+)
 
 
 class ApplicationParams(BaseModel):
@@ -94,7 +107,7 @@ def _make_keypress(native: ComputerController) -> Callable[[BaseModel], dict[str
     return handler
 
 
-def desktop_registry(native: ComputerController) -> ToolRegistry:
+def desktop_registry(native: ComputerController, help_request: HelpRequest) -> ToolRegistry:
     # No get_text here: NativeComputerController raises NotImplementedError for it —
     # screenshot is the native-app observation path instead.
     registry = ToolRegistry()
@@ -107,6 +120,7 @@ def desktop_registry(native: ComputerController) -> ToolRegistry:
         Tool("scroll", "Scroll the active view.", ScrollParams, ToolRiskLevel.LOW, _make_scroll(native)),
         Tool("keypress", "Send a keyboard shortcut, e.g. 'cmd+t'.", KeypressParams, ToolRiskLevel.LOW, _make_keypress(native)),
         Tool("wait", "Pause for a short duration.", WaitParams, ToolRiskLevel.LOW, wait),
+        Tool("ask_for_help", ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, ToolRiskLevel.LOW, make_ask_for_help(help_request)),
         Tool("finish", "Report the subtask as complete with a result.", FinishParams, ToolRiskLevel.LOW, finish),
     ):
         registry.register(tool)

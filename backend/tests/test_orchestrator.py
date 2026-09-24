@@ -68,7 +68,7 @@ def test_orchestrator_never_registers_raw_screen_tools() -> None:
 
     names = {tool.name for tool in runtime._registry.list()}
 
-    assert names == {"delegate_browser", "delegate_desktop", "delegate_research", "remember", "finish"}
+    assert names == {"delegate_browser", "delegate_desktop", "delegate_research", "remember", "ask_for_help", "finish"}
 
 
 def test_remember_writes_to_memory_service(tmp_path) -> None:
