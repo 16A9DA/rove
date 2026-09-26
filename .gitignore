@@ -17,6 +17,7 @@ task.md
 system_architecture.md
 .cursorrules
 progress.md
+test.md
 
 __pycache__/
 *.pyc
