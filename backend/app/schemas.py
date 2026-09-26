@@ -49,3 +49,26 @@ class AgentRunResponse(BaseModel):
 
 class TranscribeResponse(BaseModel):
     transcript: str
+
+
+class AppSettingsResponse(BaseModel):
+    provider: str
+    model: str | None
+    has_anthropic_key: bool
+    has_openai_key: bool
+
+
+class AppSettingsUpdate(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None
+
+
+class ModelInfo(BaseModel):
+    id: str
+    display_name: str
+
+
+class ModelListResponse(BaseModel):
+    models: list[ModelInfo]

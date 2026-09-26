@@ -10,6 +10,7 @@ CLAUDE.md
 secrets*
 *.secret
 *.db
+rove_settings.json
 
 implementation_plan.md
 task.md

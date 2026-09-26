@@ -18,10 +18,18 @@ DEFAULT_TIMEOUT = 60.0
 
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-5"
 ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
 ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
 ANTHROPIC_DEFAULT_MAX_RETRIES = 3
 ANTHROPIC_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
+
+OPENAI_DEFAULT_MODEL = "gpt-4o"
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
+# Models API lists every OpenAI model, chat and non-chat alike — filter down to what
+# this agent loop could actually call (skips embeddings/audio/image/moderation models).
+_OPENAI_NON_CHAT_MARKERS = ("embedding", "whisper", "tts", "dall-e", "moderation", "davinci-002", "babbage-002", "audio")
 
 
 class LLMProviderError(Exception):
@@ -172,3 +180,88 @@ class AnthropicProvider(LLMProvider):
         tool_calls = [ToolCall(id=b["id"], name=b["name"], arguments=json.dumps(b["input"])) for b in blocks if b["type"] == "tool_use"]
         logger.info("anthropic response tool_calls=%d", len(tool_calls))
         return LLMResponse(content="\n".join(text_parts) if text_parts else None, tool_calls=tool_calls)
+
+
+def list_anthropic_models(api_key: str) -> list[dict[str, str]]:
+    response = httpx.get(ANTHROPIC_MODELS_URL, headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_API_VERSION}, timeout=10.0)
+    if response.status_code == 401:
+        raise LLMProviderError("invalid Anthropic credentials", status_code=401)
+    if response.status_code != 200:
+        raise LLMProviderError(f"Anthropic API error ({response.status_code})", status_code=502)
+    return [{"id": m["id"], "display_name": m.get("display_name", m["id"])} for m in response.json().get("data", [])]
+
+
+def list_openai_models(api_key: str) -> list[dict[str, str]]:
+    response = httpx.get(OPENAI_MODELS_URL, headers={"Authorization": f"Bearer {api_key}"}, timeout=10.0)
+    if response.status_code == 401:
+        raise LLMProviderError("invalid OpenAI credentials", status_code=401)
+    if response.status_code != 200:
+        raise LLMProviderError(f"OpenAI API error ({response.status_code})", status_code=502)
+    ids = sorted(m["id"] for m in response.json().get("data", []) if not any(marker in m["id"] for marker in _OPENAI_NON_CHAT_MARKERS))
+    return [{"id": i, "display_name": i} for i in ids]
+
+
+class OpenAIProvider(LLMProvider):
+    """OpenAI's Chat Completions API. Messages/tools already flow through this codebase
+    in OpenAI's own shape (ToolRegistry.to_openai_tools; tool/assistant roles built in
+    app/agents/base.py) since that shape was the original design — unlike
+    AnthropicProvider, this is a near-passthrough with no translation layer."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        max_retries: int = ANTHROPIC_DEFAULT_MAX_RETRIES,
+    ) -> None:
+        api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise LLMProviderError("OPENAI_API_KEY is not set", status_code=500)
+        self.model = model or os.environ.get("OPENAI_MODEL", OPENAI_DEFAULT_MODEL)
+        self._max_retries = max_retries
+        self._client = httpx.Client(timeout=timeout, headers={"Authorization": f"Bearer {api_key}"})
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResponse:
+        logger.info("openai request model=%s messages=%d tools=%d", self.model, len(messages), len(tools or []))
+        payload: dict[str, Any] = {"model": self.model, "messages": messages}
+        if tools:
+            payload["tools"] = tools
+
+        response = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = self._client.post(OPENAI_CHAT_URL, json=payload)
+            except httpx.TimeoutException as exc:
+                raise LLMProviderError("OpenAI request timed out", status_code=504) from exc
+            except httpx.RequestError as exc:
+                raise LLMProviderError("could not reach OpenAI", status_code=502) from exc
+
+            if response.status_code == 200:
+                break
+            if response.status_code in (429, 500, 503) and attempt < self._max_retries:
+                time.sleep(ANTHROPIC_BACKOFF_SECONDS[attempt])
+                continue
+            if response.status_code == 401:
+                raise LLMProviderError("invalid OpenAI credentials", status_code=401)
+            if response.status_code == 429:
+                raise LLMProviderError("OpenAI rate limit exceeded", status_code=429)
+            if response.status_code == 400:
+                raise LLMProviderError("malformed request to OpenAI", status_code=400)
+            raise LLMProviderError(f"OpenAI API error ({response.status_code})", status_code=502)
+        assert response is not None
+
+        try:
+            message = response.json()["choices"][0]["message"]
+        except (KeyError, IndexError, ValueError) as exc:
+            raise LLMProviderError("malformed response from OpenAI", status_code=502) from exc
+
+        tool_calls = [
+            ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=tc["function"]["arguments"])
+            for tc in message.get("tool_calls") or []
+        ]
+        logger.info("openai response tool_calls=%d", len(tool_calls))
+        return LLMResponse(content=message.get("content"), tool_calls=tool_calls)

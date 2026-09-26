@@ -14,7 +14,14 @@ from app.controllers import BrowserController, NativeComputerController
 from app.help_request import HelpRequest
 from app.keyboard_watcher import InputInterruptWatcher
 from app.memory import MemoryService
-from app.providers import AnthropicProvider, LLMProvider, LLMProviderError
+from app.providers import (
+    AnthropicProvider,
+    LLMProvider,
+    LLMProviderError,
+    OpenAIProvider,
+    list_anthropic_models,
+    list_openai_models,
+)
 from app.schemas import (
     ActionSummaryResponse,
     AgentMessageRequest,
@@ -22,9 +29,14 @@ from app.schemas import (
     AgentResumeRequest,
     AgentRunRequest,
     AgentRunResponse,
+    AppSettingsResponse,
+    AppSettingsUpdate,
+    ModelInfo,
+    ModelListResponse,
     ToolCallResponse,
     TranscribeResponse,
 )
+from app.settings_store import SettingsStore
 from app.stt import MoonshineSTT, SpeechToTextProvider, STTError
 
 app = FastAPI(title="Rove Agent API")
@@ -39,12 +51,52 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@lru_cache
-def get_provider() -> LLMProvider:
+def get_settings_store() -> SettingsStore:
+    return SettingsStore()
+
+
+# Not lru_cache'd — provider/model/key are user-editable via Settings, so each request
+# must read the current choice rather than freezing the first one ever constructed.
+def get_provider(settings: SettingsStore = Depends(get_settings_store)) -> LLMProvider:
+    saved = settings.get()
     try:
-        return AnthropicProvider()
+        if saved["provider"] == "openai":
+            return OpenAIProvider(api_key=saved.get("openai_api_key"), model=saved.get("model"))
+        return AnthropicProvider(api_key=saved.get("anthropic_api_key"), model=saved.get("model"))
     except LLMProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+def _settings_response(saved: dict) -> AppSettingsResponse:
+    return AppSettingsResponse(
+        provider=saved["provider"],
+        model=saved.get("model"),
+        has_anthropic_key=bool(saved.get("anthropic_api_key")),
+        has_openai_key=bool(saved.get("openai_api_key")),
+    )
+
+
+@app.get("/api/settings", response_model=AppSettingsResponse)
+def get_app_settings(settings: SettingsStore = Depends(get_settings_store)) -> AppSettingsResponse:
+    return _settings_response(settings.get())
+
+
+@app.put("/api/settings", response_model=AppSettingsResponse)
+def update_app_settings(request: AppSettingsUpdate, settings: SettingsStore = Depends(get_settings_store)) -> AppSettingsResponse:
+    return _settings_response(settings.update(request.model_dump(exclude_none=True)))
+
+
+@app.get("/api/models", response_model=ModelListResponse)
+def list_models(provider: str, settings: SettingsStore = Depends(get_settings_store)) -> ModelListResponse:
+    saved = settings.get()
+    key = saved.get("openai_api_key") if provider == "openai" else saved.get("anthropic_api_key")
+    if not key:
+        raise HTTPException(status_code=400, detail=f"no {provider} API key saved")
+    try:
+        models = list_openai_models(key) if provider == "openai" else list_anthropic_models(key)
+    except LLMProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return ModelListResponse(models=[ModelInfo(**m) for m in models])
 
 
 @app.post("/api/agent/message", response_model=AgentMessageResponse)
