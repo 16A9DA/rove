@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Chat } from "@/components/Chat";
 import { Settings } from "@/components/Settings";
 import { Sidebar } from "@/components/Sidebar";
-import { ROVE_API_BASE } from "@/lib/roveApi";
+import { apiFetch, fetchBlobUrl, streamEvents } from "@/lib/roveApi";
 import type { ActivityStep, AgentState, Message, PreviewFrame, Task } from "@/types/task";
 
 type View = "chat" | "settings";
@@ -24,12 +24,13 @@ export function AppShell() {
   const [loadingTask, setLoadingTask] = useState(false);
   const [rating, setRating] = useState<"up" | "down" | null>(null);
   const [preview, setPreview] = useState<PreviewFrame | null>(null);
-  const stream = useRef<EventSource | null>(null);
+  const stream = useRef<AbortController | null>(null);
+  const previewUrl = useRef<string | null>(null);
   const lastSeq = useRef(0);
   const runningBackendId = useRef<string | null>(null);
 
   const loadTasks = () =>
-    fetch(`${ROVE_API_BASE}/api/tasks`)
+    apiFetch(`/api/tasks`)
       .then((response) => response.json())
       .then((rows: { id: string; title: string; status: Task["status"]; created_at: number }[]) => {
         // a run still marked "running" at startup died with the previous process
@@ -75,30 +76,38 @@ export function AppShell() {
   // Live steps arrive over SSE while the run's POST is still blocking; a resume
   // reconnects with the last seen seq so earlier steps aren't replayed.
   const openStream = (backendTaskId: string, fresh: boolean) => {
-    stream.current?.close();
+    stream.current?.abort();
     if (fresh) {
       lastSeq.current = 0;
       setSteps([]);
       setPreview(null);
     }
     runningBackendId.current = backendTaskId;
-    const source = new EventSource(`${ROVE_API_BASE}/api/agent/${backendTaskId}/events?after=${lastSeq.current}`);
-    source.onmessage = (message) => {
-      const event = JSON.parse(message.data);
-      lastSeq.current = event.seq;
-      if (event.type === "step") {
-        setSteps((prev) => {
-          const next: ActivityStep = { id: event.id, agent: event.agent, label: event.label, status: event.status };
-          return prev.some((s) => s.id === event.id) ? prev.map((s) => (s.id === event.id ? next : s)) : [...prev, next];
-        });
-      } else if (event.type === "frame") {
-        setPreview({ src: `${ROVE_API_BASE}/api/agent/${backendTaskId}/frame?n=${event.n}`, url: event.url, app: event.app });
-      } else if (event.type === "run_finished") {
-        source.close();
-      }
-    };
-    source.onerror = () => source.close();
-    stream.current = source;
+    const controller = new AbortController();
+    stream.current = controller;
+    streamEvents(
+      `/api/agent/${backendTaskId}/events?after=${lastSeq.current}`,
+      (event) => {
+        lastSeq.current = event.seq;
+        if (event.type === "step") {
+          setSteps((prev) => {
+            const next: ActivityStep = { id: event.id, agent: event.agent, label: event.label, status: event.status };
+            return prev.some((s) => s.id === event.id) ? prev.map((s) => (s.id === event.id ? next : s)) : [...prev, next];
+          });
+        } else if (event.type === "frame") {
+          fetchBlobUrl(`/api/agent/${backendTaskId}/frame?n=${event.n}`)
+            .then((src) => {
+              if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+              previewUrl.current = src;
+              setPreview({ src, url: event.url, app: event.app });
+            })
+            .catch(() => undefined);
+        } else if (event.type === "run_finished") {
+          return true;
+        }
+      },
+      controller.signal,
+    ).catch(() => undefined);
   };
 
   const startRun = async (text: string, voice = false) => {
@@ -115,7 +124,7 @@ export function AppShell() {
   const handleFeedback = async (value: "up" | "down") => {
     if (!activeTaskId) return;
     setRating(value);
-    await fetch(`${ROVE_API_BASE}/api/tasks/${activeTaskId}/feedback`, {
+    await apiFetch(`/api/tasks/${activeTaskId}/feedback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rating: value }),
@@ -124,7 +133,7 @@ export function AppShell() {
 
   const handleStop = async () => {
     if (!runningBackendId.current) return;
-    await fetch(`${ROVE_API_BASE}/api/agent/${runningBackendId.current}/stop`, { method: "POST" }).catch(() => undefined);
+    await apiFetch(`/api/agent/${runningBackendId.current}/stop`, { method: "POST" }).catch(() => undefined);
   };
 
   // Shared by the initial run and a resume — both just POST to a different
@@ -134,7 +143,7 @@ export function AppShell() {
     setAgentState("executing");
 
     try {
-      const response = await fetch(`${ROVE_API_BASE}${path}`, {
+      const response = await apiFetch(`${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -206,12 +215,12 @@ export function AppShell() {
     setActiveTaskId(id);
     setView("chat");
     if (tasks.find((t) => t.id === id)?.status === "running" && id === runningBackendId.current) return;
-    stream.current?.close();
+    stream.current?.abort();
     setPreview(null);
     setApproval(null);
     setLoadingTask(true);
     try {
-      const detail = await (await fetch(`${ROVE_API_BASE}/api/tasks/${id}`)).json();
+      const detail = await (await apiFetch(`/api/tasks/${id}`)).json();
       const restored: Message[] = [{ id: crypto.randomUUID(), role: "user", content: detail.goal, createdAt: detail.created_at * 1000 }];
       if (detail.result) {
         restored.push({ id: crypto.randomUUID(), role: "agent", content: detail.result, isError: detail.is_error, createdAt: detail.created_at * 1000 });
@@ -231,7 +240,7 @@ export function AppShell() {
   };
 
   const handleDeleteTask = async (id: string) => {
-    await fetch(`${ROVE_API_BASE}/api/tasks/${id}`, { method: "DELETE" }).catch(() => undefined);
+    await apiFetch(`/api/tasks/${id}`, { method: "DELETE" }).catch(() => undefined);
     setTasks((prev) => prev.filter((t) => t.id !== id));
     if (id === activeTaskId) handleNewTask();
   };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ROVE_API_BASE } from "@/lib/roveApi";
+import { streamEvents } from "@/lib/roveApi";
 
 type QuickState = "idle" | "listening" | "transcribing" | "executing" | "complete" | "error";
 
@@ -30,13 +30,25 @@ export default function PopoverPage() {
   useEffect(() => {
     document.documentElement.style.background = "transparent";
     document.body.style.background = "transparent";
-    const source = new EventSource(`${ROVE_API_BASE}/api/quick/events`);
-    source.onmessage = (event) => {
-      const next = JSON.parse(event.data) as { state: QuickState; message: string };
-      setState(next.state);
-      setMessage(next.message);
-    };
-    return () => source.close();
+    const controller = new AbortController();
+    (async () => {
+      while (!controller.signal.aborted) {
+        try {
+          await streamEvents(
+            "/api/quick/events",
+            (next: { state: QuickState; message: string }) => {
+              setState(next.state);
+              setMessage(next.message);
+            },
+            controller.signal,
+          );
+        } catch {
+          // backend not up yet; retry below
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    })();
+    return () => controller.abort();
   }, []);
 
   const pulsing = state === "listening" || state === "transcribing" || state === "executing";

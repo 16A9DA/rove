@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ROVE_API_BASE } from "@/lib/roveApi";
+import { apiFetch } from "@/lib/roveApi";
 
 type MemoryItem = { id: number; category: string; content: string };
 
@@ -9,14 +9,14 @@ export function MemoryList() {
   const [items, setItems] = useState<MemoryItem[] | null>(null);
 
   useEffect(() => {
-    fetch(`${ROVE_API_BASE}/api/memories`)
+    apiFetch(`/api/memories`)
       .then((response) => response.json())
       .then(setItems)
       .catch(() => setItems([]));
   }, []);
 
   const remove = async (id: number) => {
-    await fetch(`${ROVE_API_BASE}/api/memories/${id}`, { method: "DELETE" }).catch(() => undefined);
+    await apiFetch(`/api/memories/${id}`, { method: "DELETE" }).catch(() => undefined);
     setItems((prev) => prev?.filter((item) => item.id !== id) ?? null);
   };
 

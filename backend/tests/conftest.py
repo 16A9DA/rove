@@ -1,3 +1,7 @@
+import os
+
+os.environ["ROVE_AUTH_DISABLED"] = "1"
+
 from app.controllers import ComputerController
 
 

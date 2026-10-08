@@ -1,5 +1,7 @@
+import hmac
 import json
 import logging
+import os
 import queue
 import uuid
 from contextlib import asynccontextmanager
@@ -8,12 +10,14 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi import Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 from app import paused_runs, permissions
+from app.auth import load_token
 from app.activity import Activity, ActivityBus
 from agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
@@ -70,6 +74,20 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Rove Agent API", lifespan=lifespan)
+
+# ROVE_AUTH_DISABLED is for the test suite only; real runs always require the token.
+API_TOKEN = load_token()
+AUTH_DISABLED = os.environ.get("ROVE_AUTH_DISABLED") == "1"
+
+
+# Declared before CORS is added so CORS stays outermost and 401s still carry its headers.
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    if not AUTH_DISABLED and request.method != "OPTIONS" and request.url.path.startswith("/api/"):
+        if not hmac.compare_digest(request.headers.get("x-rove-token", ""), API_TOKEN):
+            return JSONResponse({"detail": "missing or invalid API token"}, status_code=401)
+    return await call_next(request)
+
 
 # Local desktop app only (Electron/localhost frontend calling a 127.0.0.1 backend),
 # never exposed publicly — allow-all is fine and avoids per-origin config.

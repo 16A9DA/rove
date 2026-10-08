@@ -1,10 +1,33 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, screen } = require("electron");
+const { app, BrowserWindow, Tray, Menu, nativeImage, screen, ipcMain } = require("electron");
+const fs = require("fs");
 const path = require("path");
 
 const DEV_URL = "http://localhost:3000";
 const PROD_ENTRY = path.join(__dirname, "..", "frontend", "out", "index.html");
 const POPOVER_ENTRY = path.join(__dirname, "..", "frontend", "out", "popover.html");
 const QUICK_EVENTS_URL = "http://127.0.0.1:8000/api/quick/events";
+const TOKEN_PATH = path.join(__dirname, "..", "backend", ".rove_token");
+
+// Shared secret the backend creates (0600) on first start; read fresh each time so a backend
+// that starts after Electron still works.
+function readToken() {
+  try {
+    return fs.readFileSync(TOKEN_PATH, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+ipcMain.handle("rove:get-token", readToken);
+
+// The app only ever shows its own pages: no popups, no navigating away to the web.
+function lockDown(win) {
+  const allowed = isDev ? DEV_URL : "file://";
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith(allowed)) event.preventDefault();
+  });
+}
 const isDev = process.env.ROVE_DEV === "1";
 
 let mainWindow = null;
@@ -30,8 +53,11 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
+  lockDown(mainWindow);
 
   if (isDev) {
     mainWindow.loadURL(DEV_URL);
@@ -66,8 +92,9 @@ function createPopover() {
     skipTaskbar: true,
     hasShadow: false,
     alwaysOnTop: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, "preload.js") },
   });
+  lockDown(popover);
   popover.setAlwaysOnTop(true, "screen-saver");
   popover.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
@@ -90,7 +117,8 @@ function showPopover() {
 async function watchQuickEvents() {
   while (!app.isQuitting) {
     try {
-      const response = await fetch(QUICK_EVENTS_URL);
+      const response = await fetch(QUICK_EVENTS_URL, { headers: { "X-Rove-Token": readToken() } });
+      if (!response.ok) throw new Error(`quick events ${response.status}`);
       const decoder = new TextDecoder();
       let buffer = "";
       for await (const chunk of response.body) {

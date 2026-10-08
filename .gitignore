@@ -29,3 +29,5 @@ build/
 .next/
 *.tsbuildinfo
 out/
+
+.rove_token

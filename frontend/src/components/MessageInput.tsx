@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type KeyboardEvent } from "react";
-import { ROVE_API_BASE } from "@/lib/roveApi";
+import { apiFetch } from "@/lib/roveApi";
 
 export function MessageInput({
   disabled,
@@ -34,14 +34,14 @@ export function MessageInput({
     setMicError(null);
     try {
       if (!listening) {
-        const response = await fetch(`${ROVE_API_BASE}/api/stt/start`, { method: "POST" });
+        const response = await apiFetch(`/api/stt/start`, { method: "POST" });
         if (!response.ok) throw new Error((await response.json()).detail ?? "could not start recording");
         setListening(true);
         return;
       }
 
       setListening(false);
-      const response = await fetch(`${ROVE_API_BASE}/api/stt/stop`, { method: "POST" });
+      const response = await apiFetch(`/api/stt/stop`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail ?? "could not transcribe");
       const { transcript } = (await response.json()) as { transcript: string };
       if (transcript) onVoiceCommand(transcript);

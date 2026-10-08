@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MemoryList } from "@/components/MemoryList";
-import { ROVE_API_BASE } from "@/lib/roveApi";
+import { apiFetch } from "@/lib/roveApi";
 
 type Provider = "anthropic" | "openai";
 
@@ -29,7 +29,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
-    fetch(`${ROVE_API_BASE}/api/settings`)
+    apiFetch(`/api/settings`)
       .then((res) => res.json())
       .then((data: AppSettings) => {
         setSettings(data);
@@ -45,7 +45,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (!hasKey) return;
-    fetch(`${ROVE_API_BASE}/api/models?provider=${provider}`)
+    apiFetch(`/api/models?provider=${provider}`)
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body.detail ?? "could not load models");
@@ -61,7 +61,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       const body: Record<string, string | boolean> = { provider, model, speak_results: speakResults };
       if (apiKey) body[provider === "anthropic" ? "anthropic_api_key" : "openai_api_key"] = apiKey;
 
-      const response = await fetch(`${ROVE_API_BASE}/api/settings`, {
+      const response = await apiFetch(`/api/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

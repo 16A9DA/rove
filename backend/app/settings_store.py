@@ -4,6 +4,7 @@ the sqlite memory DB — not env vars, since these are meant to be editable from
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -35,4 +36,5 @@ class SettingsStore:
             if value or isinstance(value, bool):
                 current[key] = value
         self._path.write_text(json.dumps(current))
+        os.chmod(self._path, 0o600)  # holds API keys
         return current
