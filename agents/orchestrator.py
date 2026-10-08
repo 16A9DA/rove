@@ -43,6 +43,11 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "never substitute your own default. After each delegate call, check whether its "
     "result actually satisfies the goal; if not, delegate again with a more specific "
     "subtask or a different agent. Call finish once the whole goal is done. "
+    "For tasks spanning several apps, work in order and finish one hand-off before "
+    "starting the next: put the exact data you need (text, numbers, paths) into the "
+    "next subtask yourself rather than saying 'what you found earlier', since each "
+    "specialist starts with no memory of the others, and check each result before "
+    "moving on. "
     "Use remember to save anything worth recalling on future tasks: personal facts "
     "or preferences about the user (category personal), a notable outcome of this "
     "task (episodic), a reusable way of doing something (workflow), or a durable "
@@ -72,7 +77,10 @@ DESKTOP_SYSTEM_PROMPT = (
     "Only fall back to screenshot for things describe_ui can't tell you (reading a "
     "document's visual content, confirming what's actually rendered) — and scroll "
     "first if what you need isn't visible on screen yet, since both only show the "
-    "current view. Save with cmd+s or cmd+shift+s (cmd+shift+g inside the save panel "
+    "current view. To move data between apps, select and cmd+c in the source, "
+    "get_clipboard to confirm what was copied, focus_application on the target, then "
+    "cmd+v; use set_clipboard when you already know the exact text; list_windows shows "
+    "what is open. Save with cmd+s or cmd+shift+s (cmd+shift+g inside the save panel "
     "to jump to a folder); close a single document with cmd+w, never cmd+q."
 )
 

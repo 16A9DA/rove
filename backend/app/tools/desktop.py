@@ -28,6 +28,10 @@ class ApplicationParams(BaseModel):
     name: str
 
 
+class ClipboardParams(BaseModel):
+    text: str = Field(max_length=20_000)
+
+
 class ClickParams(BaseModel):
     x: int
     y: int
@@ -69,6 +73,31 @@ def _make_screenshot(native: ComputerController) -> Callable[[BaseModel], dict[s
         assert isinstance(params, EmptyParams)
         jpeg_bytes = native.screenshot()
         return {"screenshot": "captured", "_image_base64": base64.b64encode(jpeg_bytes).decode("ascii")}
+
+    return handler
+
+
+def _make_get_clipboard(native: ComputerController) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, EmptyParams)
+        return {"clipboard": native.get_clipboard()[:5000]}
+
+    return handler
+
+
+def _make_set_clipboard(native: ComputerController) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, ClipboardParams)
+        native.set_clipboard(params.text)
+        return {"set": len(params.text)}
+
+    return handler
+
+
+def _make_list_windows(native: ComputerController) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, EmptyParams)
+        return {"windows": native.list_windows()}
 
     return handler
 
@@ -146,6 +175,9 @@ def desktop_registry(native: ComputerController, help_request: HelpRequest, gate
             ToolRiskLevel.LOW,
             _make_describe_ui(native),
         ),
+        Tool("list_windows", "List the open windows (owning app and title) to see which apps are running before switching between them.", EmptyParams, ToolRiskLevel.LOW, _make_list_windows(native)),
+        Tool("get_clipboard", "Read the text currently on the clipboard (e.g. to confirm what a copy picked up).", EmptyParams, ToolRiskLevel.LOW, _make_get_clipboard(native)),
+        Tool("set_clipboard", "Put exact text on the clipboard so it can be pasted into another app with cmd+v.", ClipboardParams, ToolRiskLevel.LOW, _make_set_clipboard(native)),
         Tool("click", "Click at screen coordinates.", ClickParams, ToolRiskLevel.LOW, _make_click(native, gate)),
         Tool("type", "Type text at the current focus.", TypeParams, ToolRiskLevel.LOW, _make_type(native)),
         Tool("scroll", "Scroll the active view.", ScrollParams, ToolRiskLevel.LOW, _make_scroll(native)),

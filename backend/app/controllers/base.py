@@ -44,6 +44,15 @@ class ComputerController(ABC):
         # extract visible text so a non-vision model can "observe" without a screenshot
         raise NotImplementedError
 
+    def get_clipboard(self) -> str:
+        raise NotImplementedError("this controller has no clipboard")
+
+    def set_clipboard(self, text: str) -> None:
+        raise NotImplementedError("this controller has no clipboard")
+
+    def list_windows(self) -> list[dict]:
+        raise NotImplementedError("this controller cannot list windows")
+
     def element_at(self, x: int, y: int) -> str | None:
         # label of whatever is under (x, y), for the permission gate; None when unknown
         return None

@@ -8,7 +8,7 @@ from tests.conftest import FakeNativeController
 def test_registry_lists_all_desktop_tools() -> None:
     names = {tool.name for tool in desktop_registry(FakeNativeController(), HelpRequest()).list()}
     assert names == {
-        "open_application", "focus_application", "screenshot", "describe_ui", "click", "type", "scroll",
+        "open_application", "focus_application", "screenshot", "describe_ui", "list_windows", "get_clipboard", "set_clipboard", "click", "type", "scroll",
         "keypress", "wait", "ask_for_help", "finish",
     }
 

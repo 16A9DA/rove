@@ -4,7 +4,7 @@ import time
 
 import ApplicationServices
 import Quartz
-from AppKit import NSApplicationActivateIgnoringOtherApps, NSWorkspace
+from AppKit import NSApplicationActivateIgnoringOtherApps, NSPasteboard, NSPasteboardTypeString, NSWorkspace
 
 FOCUS_TIMEOUT_SECONDS = 3.0
 FOCUS_POLL_INTERVAL_SECONDS = 0.05
@@ -252,6 +252,14 @@ class NativeComputerController(ComputerController):
         elements: list[dict] = []
         _walk_ax_tree(ax_app, elements)
         return elements
+
+    def get_clipboard(self) -> str:
+        return NSPasteboard.generalPasteboard().stringForType_(NSPasteboardTypeString) or ""
+
+    def set_clipboard(self, text: str) -> None:
+        pasteboard = NSPasteboard.generalPasteboard()
+        pasteboard.clearContents()
+        pasteboard.setString_forType_(text, NSPasteboardTypeString)
 
     def element_at(self, x: int, y: int) -> str | None:
         hits = [
