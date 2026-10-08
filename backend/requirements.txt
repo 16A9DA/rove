@@ -5,6 +5,7 @@ python-dotenv
 playwright
 pyobjc-framework-Quartz
 pyobjc-framework-Cocoa
+pyobjc-framework-ApplicationServices
 pytest
 httpx
 langsmith

@@ -39,6 +39,10 @@ class FakeComputerController(ComputerController):
         self.calls.append(("get_text", ()))
         return "fake page text"
 
+    def describe_ui(self) -> list[dict]:
+        self.calls.append(("describe_ui", ()))
+        return []
+
 
 def test_cannot_instantiate_abstract_controller() -> None:
     with pytest.raises(TypeError):

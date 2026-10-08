@@ -43,3 +43,9 @@ class ComputerController(ABC):
     def get_text(self) -> str:
         # extract visible text so a non-vision model can "observe" without a screenshot
         raise NotImplementedError
+
+    @abstractmethod
+    def describe_ui(self) -> list[dict]:
+        # list on-screen interactive elements (role/label/position/size) so click/type
+        # targets a real element instead of a guessed pixel from a screenshot
+        raise NotImplementedError

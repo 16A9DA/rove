@@ -123,3 +123,7 @@ class BrowserController(ComputerController):
     def get_text(self) -> str:
         # ponytail: flat length cap, not smart summarization — raise if a real task needs more
         return self._run(lambda: self.page.inner_text("body"))[:5000]
+
+    def describe_ui(self) -> list[dict]:
+        # a browser agent already has get_text/DOM-level grounding; this is native-only
+        raise NotImplementedError("BrowserController has get_text instead of describe_ui")

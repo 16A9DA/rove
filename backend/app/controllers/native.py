@@ -2,12 +2,77 @@ from __future__ import annotations
 
 import time
 
+import ApplicationServices
 import Quartz
 from AppKit import NSApplicationActivateIgnoringOtherApps, NSWorkspace
 
 FOCUS_TIMEOUT_SECONDS = 3.0
 FOCUS_POLL_INTERVAL_SECONDS = 0.05
 SCREENSHOT_JPEG_QUALITY = 0.7
+
+# AXMenuBar/AXMenu/AXMenuItem/AXMenuBarItem subtrees are invisible until a menu is
+# actually open (they report real titles but zero-sized, meaningless positions until
+# then) — pure noise for a click/type target list, so they're pruned on sight.
+_AX_SKIP_ROLES = {"AXMenuBar", "AXMenu", "AXMenuItem", "AXMenuBarItem"}
+_AX_MAX_DEPTH = 8
+_AX_MAX_ELEMENTS = 60
+
+
+def _ax_attr(element: object, attribute: str) -> object | None:
+    error, value = ApplicationServices.AXUIElementCopyAttributeValue(element, attribute, None)
+    return value if error == 0 else None
+
+
+def _ax_point(value: object | None) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    ok, point = ApplicationServices.AXValueGetValue(value, ApplicationServices.kAXValueCGPointType, None)
+    return (round(point.x), round(point.y)) if ok else None
+
+
+def _ax_size(value: object | None) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    ok, size = ApplicationServices.AXValueGetValue(value, ApplicationServices.kAXValueCGSizeType, None)
+    return (round(size.width), round(size.height)) if ok else None
+
+
+def _walk_ax_tree(element: object, elements: list[dict], depth: int = 0) -> None:
+    if depth > _AX_MAX_DEPTH or len(elements) >= _AX_MAX_ELEMENTS:
+        return
+
+    role = _ax_attr(element, ApplicationServices.kAXRoleAttribute)
+    if role in _AX_SKIP_ROLES:
+        return
+
+    size = _ax_size(_ax_attr(element, ApplicationServices.kAXSizeAttribute))
+    position = _ax_point(_ax_attr(element, ApplicationServices.kAXPositionAttribute))
+    label = (
+        _ax_attr(element, ApplicationServices.kAXTitleAttribute)
+        or _ax_attr(element, ApplicationServices.kAXValueAttribute)
+        or _ax_attr(element, ApplicationServices.kAXDescriptionAttribute)
+    )
+
+    # AXGroup is a layout container, not a clickable target — skip it unless it carries
+    # its own label; every other role (button/field/text/window/...) with real on-screen
+    # size is worth surfacing even unlabeled (an icon-only button still has a position).
+    if role and size and size[0] > 0 and size[1] > 0 and (label or role != "AXGroup"):
+        elements.append(
+            {
+                "role": role,
+                "label": str(label)[:80] if label else None,
+                "x": position[0] if position else None,
+                "y": position[1] if position else None,
+                "width": size[0],
+                "height": size[1],
+                "focused": bool(_ax_attr(element, ApplicationServices.kAXFocusedAttribute)),
+            }
+        )
+
+    for child in _ax_attr(element, ApplicationServices.kAXChildrenAttribute) or []:
+        if len(elements) >= _AX_MAX_ELEMENTS:
+            return
+        _walk_ax_tree(child, elements, depth + 1)
 
 from app.controllers.base import ComputerController
 
@@ -176,6 +241,17 @@ class NativeComputerController(ComputerController):
 
     def get_text(self) -> str:
         raise NotImplementedError("NativeComputerController cannot extract window text")
+
+    def describe_ui(self) -> list[dict]:
+        # grounds click()/type() in real elements instead of a screenshot pixel guess —
+        # cheap text, no vision tokens, and gives exact coordinates/focus state
+        app = NSWorkspace.sharedWorkspace().frontmostApplication()
+        if app is None:
+            return []
+        ax_app = ApplicationServices.AXUIElementCreateApplication(app.processIdentifier())
+        elements: list[dict] = []
+        _walk_ax_tree(ax_app, elements)
+        return elements
 
     def list_windows(self) -> list[dict]:
         windows = Quartz.CGWindowListCopyWindowInfo(

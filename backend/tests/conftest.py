@@ -49,6 +49,9 @@ class FakeBrowserController(ComputerController):
     def get_text(self) -> str:
         return "fake browser page text"
 
+    def describe_ui(self) -> list[dict]:
+        raise NotImplementedError("FakeBrowserController has get_text instead of describe_ui")
+
 
 class FakeNativeController(ComputerController):
     def __init__(self) -> None:
@@ -83,3 +86,6 @@ class FakeNativeController(ComputerController):
 
     def get_text(self) -> str:
         raise NotImplementedError("FakeNativeController cannot extract window text")
+
+    def describe_ui(self) -> list[dict]:
+        return [{"role": "AXButton", "label": "fake button", "x": 10, "y": 20, "width": 80, "height": 24, "focused": False}]

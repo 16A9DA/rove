@@ -71,6 +71,14 @@ def _make_screenshot(native: ComputerController) -> Callable[[BaseModel], dict[s
     return handler
 
 
+def _make_describe_ui(native: ComputerController) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, EmptyParams)
+        return {"elements": native.describe_ui()}
+
+    return handler
+
+
 def _make_click(native: ComputerController) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, ClickParams)
@@ -115,6 +123,15 @@ def desktop_registry(native: ComputerController, help_request: HelpRequest) -> T
         Tool("open_application", "Open a native application by name.", ApplicationParams, ToolRiskLevel.LOW, _make_open_application(native)),
         Tool("focus_application", "Bring an already-open application to the foreground.", ApplicationParams, ToolRiskLevel.LOW, _make_focus_application(native)),
         Tool("screenshot", "Capture a screenshot of the current screen.", EmptyParams, ToolRiskLevel.LOW, _make_screenshot(native)),
+        Tool(
+            "describe_ui",
+            "List the frontmost application's visible interactive elements (role, label, exact x/y/width/height, "
+            "whether focused). Call this before click/type to get real coordinates instead of guessing from a "
+            "screenshot — cheaper and more reliable than vision.",
+            EmptyParams,
+            ToolRiskLevel.LOW,
+            _make_describe_ui(native),
+        ),
         Tool("click", "Click at screen coordinates.", ClickParams, ToolRiskLevel.LOW, _make_click(native)),
         Tool("type", "Type text at the current focus.", TypeParams, ToolRiskLevel.LOW, _make_type(native)),
         Tool("scroll", "Scroll the active view.", ScrollParams, ToolRiskLevel.LOW, _make_scroll(native)),
