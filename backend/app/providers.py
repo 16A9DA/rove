@@ -9,8 +9,22 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from langsmith import traceable
 
 logger = logging.getLogger("rove.providers")
+
+# ponytail: process_inputs/process_outputs strip self (holds the httpx.Client with the
+# API key in its headers) before anything reaches LangSmith — never trust default
+# serialization of an object graph that contains credentials.
+def _trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    provider = inputs.get("self")
+    messages = inputs.get("messages") or []
+    tools = inputs.get("tools") or []
+    return {"model": getattr(provider, "model", None), "message_count": len(messages), "tool_count": len(tools)}
+
+
+def _trace_outputs(output: "LLMResponse") -> dict[str, Any]:
+    return {"content_length": len(output.content) if output.content else 0, "tool_call_count": len(output.tool_calls)}
 
 # ponytail: flat constant. Vision completions (image tokens) run slower than text-only —
 # raise further if screenshot-heavy runs still hit a timeout.
@@ -133,6 +147,7 @@ class AnthropicProvider(LLMProvider):
             headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_API_VERSION},
         )
 
+    @traceable(run_type="llm", name="anthropic_complete", process_inputs=_trace_inputs, process_outputs=_trace_outputs)
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -221,6 +236,7 @@ class OpenAIProvider(LLMProvider):
         self._max_retries = max_retries
         self._client = httpx.Client(timeout=timeout, headers={"Authorization": f"Bearer {api_key}"})
 
+    @traceable(run_type="llm", name="openai_complete", process_inputs=_trace_inputs, process_outputs=_trace_outputs)
     def complete(
         self,
         messages: list[dict[str, Any]],
