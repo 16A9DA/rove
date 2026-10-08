@@ -68,6 +68,8 @@ Backend, from `backend/`:
 PYTHONPATH=.. .venv/bin/uvicorn app.main:app --reload --reload-dir app --reload-dir ../agents
 ```
 
+The desktop app starts this backend for you from `backend/.venv` if nothing is already answering on port 8000, logs to `~/Library/Logs/rove-desktop/backend.log`, and stops it when you quit. Because Electron launches it, macOS permissions attach to the Rove (Electron) app. Run it by hand as above when developing the backend.
+
 On first start the backend creates `backend/.rove_token`. Every `/api` call must carry it in the `X-Rove-Token` header. The Electron shell reads it automatically.
 
 Desktop app, development:
@@ -136,6 +138,6 @@ backend/.venv/bin/python scripts/e2e_smoke.py [--live "Open Finder"]
 
 * Features added after the voice and orchestrator work (live activity, preview, permissions, files, recovery, injection defense, persistence, memory, spoken results, polish, API token) were built without running tests, lint, type checks or a live session. The smoke script exists but has not been run. Expect bugs and run it first.
 * Task history and memory use SQLite, not PostgreSQL, because Rove is a single user local app.
-* The backend must be started separately. There is no packaged installer yet.
+* There is no packaged installer. Rove runs from the repository: the desktop app starts the backend from `backend/.venv`, so the install steps above are required. Bundling Python and PyTorch into a `.dmg` is not done.
 * Clicks are still coordinate based. The permission check reads the control under the cursor but cannot see intent beyond that.
 * Quick (Command hold) runs can pause for approval, but the popover cannot approve. Open the app.

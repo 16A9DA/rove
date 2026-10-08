@@ -1,12 +1,42 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, screen, ipcMain } = require("electron");
 const fs = require("fs");
+const { spawn } = require("child_process");
 const path = require("path");
 
 const DEV_URL = "http://localhost:3000";
 const PROD_ENTRY = path.join(__dirname, "..", "frontend", "out", "index.html");
 const POPOVER_ENTRY = path.join(__dirname, "..", "frontend", "out", "popover.html");
 const QUICK_EVENTS_URL = "http://127.0.0.1:8000/api/quick/events";
-const TOKEN_PATH = path.join(__dirname, "..", "backend", ".rove_token");
+const BACKEND_DIR = path.join(__dirname, "..", "backend");
+const TOKEN_PATH = path.join(BACKEND_DIR, ".rove_token");
+const HEALTH_URL = "http://127.0.0.1:8000/health";
+let backend = null;
+
+// Starts the backend from the repo's venv unless one is already answering (e.g. started by hand).
+// Only a backend we started is stopped on quit. Output goes to ~/Library/Logs/<app>/backend.log.
+async function ensureBackend() {
+  try {
+    const response = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(1000) });
+    if (response.ok) return;
+  } catch {
+    // not running; start it below
+  }
+  const python = path.join(BACKEND_DIR, ".venv", "bin", "python");
+  if (!fs.existsSync(python)) {
+    console.error("Rove backend not started: backend/.venv is missing (see README install steps).");
+    return;
+  }
+  fs.mkdirSync(app.getPath("logs"), { recursive: true });
+  const log = fs.openSync(path.join(app.getPath("logs"), "backend.log"), "a");
+  backend = spawn(python, ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"], {
+    cwd: BACKEND_DIR,
+    env: { ...process.env, PYTHONPATH: path.join(__dirname, "..") },
+    stdio: ["ignore", log, log],
+  });
+  backend.on("exit", () => {
+    backend = null;
+  });
+}
 
 // Shared secret the backend creates (0600) on first start; read fresh each time so a backend
 // that starts after Electron still works.
@@ -202,6 +232,7 @@ function createAppMenu() {
 }
 
 app.whenReady().then(() => {
+  ensureBackend();
   createAppMenu();
   createTray();
   createWindow();
@@ -213,6 +244,7 @@ app.whenReady().then(() => {
 
 app.on("before-quit", () => {
   app.isQuitting = true;
+  if (backend) backend.kill();
 });
 
 app.on("window-all-closed", () => {
