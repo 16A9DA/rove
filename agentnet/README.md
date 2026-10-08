@@ -24,7 +24,7 @@ assumed from the dataset card.
 
 ## Why Rove uses it
 
-Rove's agent loop (`backend/app/agents/`) drives `click`/`type`/`keypress`/`scroll` through
+Rove's agent loop (`agents/`) drives `click`/`type`/`keypress`/`scroll` through
 a `ComputerController`. AgentNet is a large, independently-collected sample of what those
 same primitives look like across real desktop tasks — useful as reference/eval data for
 Rove's computer-use layer without touching the agent runtime itself.
@@ -33,9 +33,9 @@ Rove's computer-use layer without touching the agent runtime itself.
 
 Only the JSONL trajectory text — never the screenshot archives (200GB of split zips), which
 this integration doesn't download or reference beyond the filename already present in each
-step. From each step, `evaluation/agentnet/parser.py` parses the `code` string (via
+step. From each step, `agentnet/parser.py` parses the `code` string (via
 `ast.literal_eval`, never `eval()`/`exec()` — it's untrusted external text) into a
-`RoveAction` (`evaluation/agentnet/schema.py`):
+`RoveAction` (`agentnet/schema.py`):
 
 ```json
 {"action": "click", "target": {"description": "Click on the GIMP application icon..."}, "coordinate": {"x": 0.377, "y": 0.193}}
@@ -72,7 +72,7 @@ a model, both explicitly out of scope here.
 
 ## Loading a subset without downloading 200GB
 
-`evaluation/agentnet/loader.py` uses `datasets.load_dataset(..., streaming=True)`, which
+`agentnet/loader.py` uses `datasets.load_dataset(..., streaming=True)`, which
 opens the Hub files as a lazy iterator — `load_tasks(limit=5)` only ever pulls 5 rows over
 the wire, not the whole multi-GB trajectory file. `load_metadata()` reads
 `meta_data_merged.jsonl` instead, which is orders of magnitude lighter (no trajectory
@@ -82,7 +82,7 @@ payload) and a better source for a larger filtering/stats sample.
 
 ```
 cd backend
-.venv/bin/python -m evaluation.agentnet --limit 5 --source ubuntu
+PYTHONPATH=.. .venv/bin/python -m agentnet --limit 5 --source ubuntu
 ```
 
 Prints the stats JSON (`num_tasks`, `num_steps`, `completion_rate`, `avg_steps_per_task`,
@@ -93,7 +93,7 @@ from the Windows/macOS trajectory file instead. First run is slower (tens of sec
 Programmatically:
 
 ```python
-from evaluation.agentnet import run_evaluation
+from agentnet import run_evaluation
 
 report = run_evaluation(limit=5, source="ubuntu")
 report.stats.to_dict()          # summary counts

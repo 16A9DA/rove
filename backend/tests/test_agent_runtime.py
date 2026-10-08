@@ -1,6 +1,6 @@
 import json
 
-from app.agents import AgentRuntime
+from agents import AgentRuntime
 from app.providers import LLMProviderError, LLMResponse, ToolCall
 from app.help_request import HelpRequest
 from app.tools import browser_registry, desktop_registry

@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app import paused_runs
-from app.agents import ActionSummary, AgentResult
+from agents import ActionSummary, AgentResult
 from app.main import app, get_orchestrator, get_provider
 from app.providers import LLMProviderError, LLMResponse, ToolCall
 

@@ -1,11 +1,11 @@
 import json
 
-from evaluation.agentnet.loader import load_metadata, load_tasks
-from evaluation.agentnet.normalize import normalize_task, normalize_tasks
-from evaluation.agentnet.parser import parse_code
-from evaluation.agentnet.pipeline import run_evaluation
-from evaluation.agentnet.schema import AgentNetTask
-from evaluation.agentnet.stats import compute_stats
+from agentnet.loader import load_metadata, load_tasks
+from agentnet.normalize import normalize_task, normalize_tasks
+from agentnet.parser import parse_code
+from agentnet.pipeline import run_evaluation
+from agentnet.schema import AgentNetTask
+from agentnet.stats import compute_stats
 
 TASK_ROWS = [
     {
@@ -223,7 +223,7 @@ def test_compute_stats(tmp_path) -> None:
 
 def test_run_evaluation_end_to_end(tmp_path, monkeypatch) -> None:
     fixture = _write_jsonl(tmp_path, "tasks.jsonl", TASK_ROWS)
-    monkeypatch.setattr("evaluation.agentnet.pipeline.load_tasks", lambda limit, source: load_tasks(limit=limit, dataset_name="json", data_files=fixture))
+    monkeypatch.setattr("agentnet.pipeline.load_tasks", lambda limit, source: load_tasks(limit=limit, dataset_name="json", data_files=fixture))
 
     report = run_evaluation(limit=None, source="ubuntu")
 

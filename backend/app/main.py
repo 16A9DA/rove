@@ -9,7 +9,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 from app import paused_runs
-from app.agents import AgentRuntime, orchestrator_runtime
+from agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
 from app.help_request import HelpRequest
 from app.keyboard_watcher import InputInterruptWatcher

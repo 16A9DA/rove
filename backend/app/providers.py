@@ -204,7 +204,7 @@ def list_openai_models(api_key: str) -> list[dict[str, str]]:
 class OpenAIProvider(LLMProvider):
     """OpenAI's Chat Completions API. Messages/tools already flow through this codebase
     in OpenAI's own shape (ToolRegistry.to_openai_tools; tool/assistant roles built in
-    app/agents/base.py) since that shape was the original design — unlike
+    agents/base.py) since that shape was the original design — unlike
     AnthropicProvider, this is a near-passthrough with no translation layer."""
 
     def __init__(

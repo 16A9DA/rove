@@ -1,6 +1,6 @@
 import json
 
-from app.agents import orchestrator_runtime
+from agents import orchestrator_runtime
 from app.memory import MemoryCategory, MemoryService
 from app.providers import LLMResponse, ToolCall
 from tests.conftest import FakeBrowserController, FakeNativeController

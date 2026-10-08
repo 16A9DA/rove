@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from app.agents.base import AgentResult, AgentRuntime
+from agents.base import AgentResult, AgentRuntime
 
 # Each delegate call is its own AgentRuntime with its own independent deadline (see
 # AgentRuntime.run) — the orchestrator's own budget must comfortably outlast several
