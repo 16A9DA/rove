@@ -26,6 +26,7 @@ from app.tools import (
     ToolRiskLevel,
     browser_registry,
     desktop_registry,
+    files_registry,
     finish,
     make_ask_for_help,
     research_registry,
@@ -35,8 +36,9 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "You are Rove's orchestrator. You never touch the screen yourself — break the "
     "user's goal into subtasks and delegate each to the right specialist: "
     "delegate_browser for anything in a web browser, delegate_desktop for native "
-    "macOS applications, delegate_research for reading a URL's content without "
-    "opening a browser. If the user names a specific app or site (e.g. \"search on "
+    "macOS applications, delegate_files for reading/finding/moving/copying/writing/"
+    "trashing files in Desktop, Documents and Downloads, delegate_research for "
+    "reading a URL's content without opening a browser. If the user names a specific app or site (e.g. \"search on "
     "DuckDuckGo\", \"open TextEdit\"), pass that exact name through in the subtask — "
     "never substitute your own default. After each delegate call, check whether its "
     "result actually satisfies the goal; if not, delegate again with a more specific "
@@ -72,6 +74,15 @@ DESKTOP_SYSTEM_PROMPT = (
     "first if what you need isn't visible on screen yet, since both only show the "
     "current view. Save with cmd+s or cmd+shift+s (cmd+shift+g inside the save panel "
     "to jump to a folder); close a single document with cmd+w, never cmd+q."
+)
+
+FILES_SYSTEM_PROMPT = (
+    "You are Rove's files specialist. Use your file tools to complete the subtask, "
+    "then call finish. You can only touch Desktop, Documents and Downloads, with "
+    "absolute paths (or ~). Look before you change: list_directory or search_files "
+    "first, never guess a path. Nothing is overwritten unless you set overwrite=true, "
+    "and replacing or trashing a file needs the user's approval, so if a tool says it "
+    "is blocked pending approval, stop and call finish describing what is waiting."
 )
 
 RESEARCH_SYSTEM_PROMPT = (
@@ -167,6 +178,11 @@ def orchestrator_runtime(
             provider, desktop_registry(native, help_request, gate), _with_memory(DESKTOP_SYSTEM_PROMPT), agent_name="desktop", on_event=on_event, observe=observe_desktop
         )
 
+    def build_files_runtime() -> AgentRuntime:
+        return AgentRuntime(
+            provider, files_registry(help_request, gate), _with_memory(FILES_SYSTEM_PROMPT), agent_name="files", on_event=on_event
+        )
+
     def build_research_runtime() -> AgentRuntime:
         return AgentRuntime(
             provider, research_registry(help_request), _with_memory(RESEARCH_SYSTEM_PROMPT), agent_name="research", on_event=on_event
@@ -175,6 +191,7 @@ def orchestrator_runtime(
     registry = ToolRegistry()
     registry.register(Tool("delegate_browser", "Delegate a subtask to the browser specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_browser_runtime, cancel_check, help_request.question)))
     registry.register(Tool("delegate_desktop", "Delegate a subtask to the native-application specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_desktop_runtime, cancel_check, help_request.question)))
+    registry.register(Tool("delegate_files", "Delegate a subtask to the files specialist agent (read, find, move, copy, write, trash files in Desktop/Documents/Downloads).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_files_runtime, cancel_check, help_request.question)))
     registry.register(Tool("delegate_research", "Delegate a subtask to the research specialist agent (reads a URL without a browser).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_research_runtime, cancel_check, help_request.question)))
     registry.register(Tool("remember", "Save something worth recalling on future tasks.", RememberParams, ToolRiskLevel.LOW, _make_remember(memory)))
     registry.register(Tool("ask_for_help", ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, ToolRiskLevel.LOW, make_ask_for_help(help_request)))

@@ -17,6 +17,7 @@ from app.tools.base import (
 )
 from app.tools.browser import browser_registry
 from app.tools.desktop import desktop_registry
+from app.tools.files import files_registry
 from app.tools.research import research_registry
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "wait",
     "browser_registry",
     "desktop_registry",
+    "files_registry",
     "research_registry",
 ]

@@ -71,8 +71,11 @@ class PermissionGate:
         self.task_id = task_id
 
     def guard(self, tool: str, args: dict, label: str | None, keys: str | None = None) -> None:
-        if not classify(tool, label, keys):
-            return
+        if classify(tool, label, keys):
+            self.require(tool, args, f"{tool} {label!r}" if label else f"{tool} {keys}")
+
+    # Unconditional: used where the operation itself (not a label) is the risk, e.g. trashing a file.
+    def require(self, tool: str, args: dict, summary: str) -> None:
         task_id = self.task_id or ""
         fp = _fingerprint(tool, args)
         with _lock:
@@ -80,7 +83,6 @@ class PermissionGate:
                 _granted[task_id].discard(fp)
                 return
             denied = fp in _denied.get(task_id, set())
-        summary = f"{tool} {label!r}" if label else f"{tool} {keys}"
         if denied:
             raise ToolError(f"The user denied this action ({summary}). Do not attempt it again; choose another way or finish.")
         with _lock:

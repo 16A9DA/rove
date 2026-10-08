@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 from collections import OrderedDict
@@ -10,6 +11,17 @@ from urllib.parse import urlparse
 
 MAX_TASKS_KEPT = 50
 LABEL_MAX = 90
+
+_FILE_VERBS = {
+    "list_directory": "Listing",
+    "read_file": "Reading",
+    "search_files": "Searching in",
+    "make_directory": "Creating folder",
+    "write_file": "Writing",
+    "move_file": "Moving",
+    "copy_file": "Copying",
+    "trash_file": "Moving to Trash:",
+}
 
 _FIXED_LABELS = {
     "click": "Clicking",
@@ -58,6 +70,9 @@ def describe_tool(name: str, arguments: str) -> str:
     if name in ("open_application", "focus_application"):
         verb = "Opening" if name == "open_application" else "Switching to"
         return _clip(f"{verb} {args.get('name', 'an app')}")
+    if name in _FILE_VERBS:
+        target = args.get("path") or args.get("source") or args.get("root") or ""
+        return _clip(f"{_FILE_VERBS[name]} {os.path.basename(str(target).rstrip('/')) or 'a folder'}")
     if name.startswith("delegate_"):
         agent = name.removeprefix("delegate_")
         return _clip(f"{agent.capitalize()} agent: {args.get('subtask', '')}")
