@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.controllers.browser import BrowserController
 from app.help_request import HelpRequest
+from app.untrusted import require_web_url, wrap
 if TYPE_CHECKING:
     from app.permissions import PermissionGate
 from app.tools.base import (
@@ -49,6 +50,7 @@ class KeypressParams(BaseModel):
 def _make_open_url(browser: BrowserController) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, OpenUrlParams)
+        require_web_url(params.url)
         if not browser.is_launched:
             browser.launch()
         browser.navigate(params.url)
@@ -60,7 +62,7 @@ def _make_open_url(browser: BrowserController) -> Callable[[BaseModel], dict[str
 def _make_get_text(browser: BrowserController) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, EmptyParams)
-        return {"text": browser.get_text()}
+        return {"text": wrap("web page", browser.get_text())}
 
     return handler
 

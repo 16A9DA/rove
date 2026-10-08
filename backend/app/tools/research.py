@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel
 
 from app.help_request import HelpRequest
+from app.untrusted import require_public_host, wrap
 from app.tools.base import ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, FinishParams, Tool, ToolRegistry, ToolRiskLevel, finish, make_ask_for_help
 
 # ponytail: flat length cap, matches BrowserController.get_text's cap — raise if a
@@ -20,9 +21,10 @@ class FetchUrlParams(BaseModel):
 
 def fetch_url(params: BaseModel) -> dict[str, Any]:
     assert isinstance(params, FetchUrlParams)
+    require_public_host(params.url)
     response = httpx.get(params.url, follow_redirects=True, timeout=FETCH_TIMEOUT_SECONDS)
     response.raise_for_status()
-    return {"content": response.text[:MAX_FETCH_CHARS]}
+    return {"content": wrap("fetched page", response.text[:MAX_FETCH_CHARS])}
 
 
 def research_registry(help_request: HelpRequest) -> ToolRegistry:

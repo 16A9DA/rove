@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from pydantic import BaseModel, Field
 
 from app.help_request import HelpRequest
+from app.untrusted import wrap
 from app.tools.base import ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, FinishParams, Tool, ToolError, ToolRegistry, ToolRiskLevel, finish, make_ask_for_help
 
 if TYPE_CHECKING:
@@ -87,7 +88,7 @@ def _read_file(params: BaseModel) -> dict[str, Any]:
         raise ToolError("not a file")
     data = path.read_bytes()[:MAX_READ_BYTES]
     try:
-        return {"content": data.decode("utf-8")}
+        return {"content": wrap("file", data.decode("utf-8"))}
     except UnicodeDecodeError:
         raise ToolError("not a text file") from None
 
