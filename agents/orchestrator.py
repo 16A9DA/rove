@@ -29,7 +29,6 @@ from app.tools import (
     files_registry,
     finish,
     make_ask_for_help,
-    research_registry,
 )
 
 SECURITY_RULES = (
@@ -44,10 +43,13 @@ SECURITY_RULES = (
 ORCHESTRATOR_SYSTEM_PROMPT = (
     "You are Rove's orchestrator. You never touch the screen yourself — break the "
     "user's goal into subtasks and delegate each to the right specialist: "
-    "delegate_browser for anything in a web browser, delegate_desktop for native "
-    "macOS applications, delegate_files for reading/finding/moving/copying/writing/"
-    "trashing files in Desktop, Documents and Downloads, delegate_research for "
-    "reading a URL's content without opening a browser. If the user names a specific app or site (e.g. \"search on "
+    "delegate_browser for anything on the web, including searching and researching "
+    "(the user watches their browser work, so nothing happens out of sight), "
+    "delegate_desktop for native macOS applications, delegate_files for "
+    "reading/finding/moving/copying/writing/trashing files in Desktop, Documents and "
+    "Downloads. Everything you do must be visible to the user: never work silently "
+    "in the background, and keep the user able to follow each step. "
+    "If the user names a specific app or site (e.g. \"search on "
     "DuckDuckGo\", \"open TextEdit\"), pass that exact name through in the subtask — "
     "never substitute your own default. After each delegate call, check whether its "
     "result actually satisfies the goal; if not, delegate again with a more specific "
@@ -63,6 +65,14 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "task (episodic), a reusable way of doing something (workflow), or a durable "
     "fact about their setup/accounts/files (structured). Don't bother for anything "
     "only relevant to this one task."
+    "Do not assume what is installed on the user's laptop (for example there may be no "
+    "Mail or Outlook app). Have the specialists look, using the screen and Spotlight, "
+    "and for email without a mail app use the web mail site in the browser. If a step "
+    "cannot be done (missing app, sign-in needed, blocked), tell the user plainly and "
+    "call ask_for_help or finish with success=false; never claim success you did not "
+    "verify, and never silently change the task. Keep research proportionate: visit "
+    "three or four pages at most, never re-visit a page you already read (pass what you "
+    "learned into the next subtask), then move on to writing and delivering. "
 )
 
 BROWSER_SYSTEM_PROMPT = (
@@ -72,9 +82,7 @@ BROWSER_SYSTEM_PROMPT = (
     "directly (e.g. https://duckduckgo.com), don't substitute a different one. "
     "There is no 'navigate' tool, and internal browser pages like chrome:// are not "
     "reachable. Use get_text for cheap reads (it returns the whole page's text, not "
-    "just what's visible). Use scroll before a screenshot when what you need to "
-    "click or read isn't visible in the current view — screenshot only shows what's "
-    "currently on screen. Interact like a person: type into the focused input, "
+    "just what's visible). To read a page, call get_text once: it already returns the whole page, so do not scroll and screenshot repeatedly to read text. Use screenshot only to find something to click or to check how a page looks, and scroll only when a control you must click is off screen. If a page asks you to sign in or shows a CAPTCHA, call ask_for_help and say exactly what you need; never guess credentials. Interact like a person: type into the focused input, "
     "press Return to submit, rather than building query URLs by hand."
 )
 
@@ -92,6 +100,12 @@ DESKTOP_SYSTEM_PROMPT = (
     "cmd+v; use set_clipboard when you already know the exact text; list_windows shows "
     "what is open. Save with cmd+s or cmd+shift+s (cmd+shift+g inside the save panel "
     "to jump to a folder); close a single document with cmd+w, never cmd+q."
+    "Never assume an app is installed or set up. To find one, open Spotlight with "
+    "keypress cmd+space, type the app name, and take a screenshot to see what is "
+    "really there. If the app is missing or not signed in, or you cannot do what was "
+    "asked, stop and call finish with success=false explaining plainly what blocked "
+    "you, or ask_for_help if the user could fix it. Never pretend a step worked or "
+    "silently swap in something else. "
 )
 
 FILES_SYSTEM_PROMPT = (
@@ -102,12 +116,6 @@ FILES_SYSTEM_PROMPT = (
     "and replacing or trashing a file needs the user's approval, so if a tool says it "
     "is blocked pending approval, stop and call finish describing what is waiting."
 )
-
-RESEARCH_SYSTEM_PROMPT = (
-    "You are Rove's research specialist. Use fetch_url to read the content needed "
-    "for the subtask, then call finish with what you found."
-)
-
 
 class SubtaskParams(BaseModel):
     subtask: str
@@ -218,16 +226,10 @@ def orchestrator_runtime(
             provider, files_registry(help_request, gate), _with_memory(FILES_SYSTEM_PROMPT), agent_name="files", on_event=on_event
         )
 
-    def build_research_runtime() -> AgentRuntime:
-        return AgentRuntime(
-            provider, research_registry(help_request), _with_memory(RESEARCH_SYSTEM_PROMPT), agent_name="research", on_event=on_event
-        )
-
     registry = ToolRegistry()
     registry.register(Tool("delegate_browser", "Delegate a subtask to the browser specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_browser_runtime, cancel_check, help_request.question)))
     registry.register(Tool("delegate_desktop", "Delegate a subtask to the native-application specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_desktop_runtime, cancel_check, help_request.question)))
     registry.register(Tool("delegate_files", "Delegate a subtask to the files specialist agent (read, find, move, copy, write, trash files in Desktop/Documents/Downloads).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_files_runtime, cancel_check, help_request.question)))
-    registry.register(Tool("delegate_research", "Delegate a subtask to the research specialist agent (reads a URL without a browser).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_research_runtime, cancel_check, help_request.question)))
     registry.register(Tool("recall", "Search your saved memories by keywords (older or less recent than what is in your prompt).", RecallParams, ToolRiskLevel.LOW, _make_recall(memory)))
     registry.register(Tool("remember", "Save something worth recalling on future tasks.", RememberParams, ToolRiskLevel.LOW, _make_remember(memory)))
     registry.register(Tool("ask_for_help", ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, ToolRiskLevel.LOW, make_ask_for_help(help_request)))
