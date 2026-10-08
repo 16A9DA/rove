@@ -253,6 +253,16 @@ class NativeComputerController(ComputerController):
         _walk_ax_tree(ax_app, elements)
         return elements
 
+    def element_at(self, x: int, y: int) -> str | None:
+        hits = [
+            e
+            for e in self.describe_ui()
+            if e.get("label") and e["x"] <= x <= e["x"] + e["width"] and e["y"] <= y <= e["y"] + e["height"]
+        ]
+        if not hits:
+            return None
+        return min(hits, key=lambda e: e["width"] * e["height"])["label"]
+
     def list_windows(self) -> list[dict]:
         windows = Quartz.CGWindowListCopyWindowInfo(
             Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements, Quartz.kCGNullWindowID

@@ -12,6 +12,7 @@ export function Chat({
   agentState,
   steps,
   preview,
+  approval,
   onSend,
   onVoiceCommand,
   onResume,
@@ -21,9 +22,10 @@ export function Chat({
   agentState: AgentState;
   steps: ActivityStep[];
   preview: PreviewFrame | null;
+  approval: string | null;
   onSend: (text: string) => void;
   onVoiceCommand: (text: string) => void;
-  onResume?: () => void;
+  onResume?: (decision?: "approve" | "deny") => void;
   onStop?: () => void;
 }) {
   const inputDisabled = agentState === "thinking" || agentState === "executing";
@@ -42,9 +44,26 @@ export function Chat({
               Stop
             </button>
           )}
-          {agentState === "paused" && onResume && (
+          {agentState === "paused" && onResume && approval && (
+            <>
+              <span className="max-w-64 truncate text-sm text-amber-300/80">Approve: {approval}</span>
+              <button
+                onClick={() => onResume("deny")}
+                className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-white/70 hover:bg-white/[0.08]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => onResume("approve")}
+                className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-400/20"
+              >
+                Approve
+              </button>
+            </>
+          )}
+          {agentState === "paused" && onResume && !approval && (
             <button
-              onClick={onResume}
+              onClick={() => onResume()}
               className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-white/70 hover:bg-white/[0.08]"
             >
               Continue

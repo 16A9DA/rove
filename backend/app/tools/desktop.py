@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import base64
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from pydantic import BaseModel, Field
 
 from app.controllers.base import ComputerController
 from app.help_request import HelpRequest
+if TYPE_CHECKING:
+    from app.permissions import PermissionGate
 from app.tools.base import (
     ASK_FOR_HELP_DESCRIPTION,
     AskForHelpParams,
@@ -79,9 +81,19 @@ def _make_describe_ui(native: ComputerController) -> Callable[[BaseModel], dict[
     return handler
 
 
-def _make_click(native: ComputerController) -> Callable[[BaseModel], dict[str, Any]]:
+def _label_at(controller, x: int, y: int) -> str | None:
+    # A failed lookup must not block or crash the click — the gate just sees no label.
+    try:
+        return controller.element_at(x, y)
+    except Exception:
+        return None
+
+
+def _make_click(native: ComputerController, gate: PermissionGate | None = None) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, ClickParams)
+        if gate is not None:
+            gate.guard("click", {"x": params.x, "y": params.y}, _label_at(native, params.x, params.y))
         native.click(params.x, params.y)
         return {"clicked": [params.x, params.y]}
 
@@ -106,16 +118,18 @@ def _make_scroll(native: ComputerController) -> Callable[[BaseModel], dict[str, 
     return handler
 
 
-def _make_keypress(native: ComputerController) -> Callable[[BaseModel], dict[str, Any]]:
+def _make_keypress(native: ComputerController, gate: PermissionGate | None = None) -> Callable[[BaseModel], dict[str, Any]]:
     def handler(params: BaseModel) -> dict[str, Any]:
         assert isinstance(params, KeypressParams)
+        if gate is not None:
+            gate.guard("keypress", {"keys": params.keys}, None, params.keys)
         native.keypress(params.keys)
         return {"pressed": params.keys}
 
     return handler
 
 
-def desktop_registry(native: ComputerController, help_request: HelpRequest) -> ToolRegistry:
+def desktop_registry(native: ComputerController, help_request: HelpRequest, gate: PermissionGate | None = None) -> ToolRegistry:
     # No get_text here: NativeComputerController raises NotImplementedError for it —
     # screenshot is the native-app observation path instead.
     registry = ToolRegistry()
@@ -132,10 +146,10 @@ def desktop_registry(native: ComputerController, help_request: HelpRequest) -> T
             ToolRiskLevel.LOW,
             _make_describe_ui(native),
         ),
-        Tool("click", "Click at screen coordinates.", ClickParams, ToolRiskLevel.LOW, _make_click(native)),
+        Tool("click", "Click at screen coordinates.", ClickParams, ToolRiskLevel.LOW, _make_click(native, gate)),
         Tool("type", "Type text at the current focus.", TypeParams, ToolRiskLevel.LOW, _make_type(native)),
         Tool("scroll", "Scroll the active view.", ScrollParams, ToolRiskLevel.LOW, _make_scroll(native)),
-        Tool("keypress", "Send a keyboard shortcut, e.g. 'cmd+t'.", KeypressParams, ToolRiskLevel.LOW, _make_keypress(native)),
+        Tool("keypress", "Send a keyboard shortcut, e.g. 'cmd+t'.", KeypressParams, ToolRiskLevel.LOW, _make_keypress(native, gate)),
         Tool("wait", "Pause for a short duration.", WaitParams, ToolRiskLevel.LOW, wait),
         Tool("ask_for_help", ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, ToolRiskLevel.LOW, make_ask_for_help(help_request)),
         Tool("finish", "Report the subtask as complete with a result.", FinishParams, ToolRiskLevel.LOW, finish),

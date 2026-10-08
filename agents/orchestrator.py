@@ -15,6 +15,7 @@ from app.activity import safe_url
 from app.controllers import BrowserController, ComputerController, NativeComputerController
 from app.help_request import HelpRequest
 from app.memory import MemoryCategory, MemoryService
+from app.permissions import PermissionGate
 from app.providers import LLMProvider
 from app.tools import (
     ASK_FOR_HELP_DESCRIPTION,
@@ -127,6 +128,7 @@ def orchestrator_runtime(
     cancel_check: Callable[[], bool] | None = None,
     help_request: HelpRequest | None = None,
     on_event: Callable[[dict[str, Any]], None] | None = None,
+    gate: PermissionGate | None = None,
 ) -> AgentRuntime:
     # A fresh sub-AgentRuntime (and message history) is built per delegate call, but
     # the underlying controller is shared across the whole task — a browser tab or
@@ -157,12 +159,12 @@ def orchestrator_runtime(
         # Real headed Chrome (BrowserController) is already visible on screen — no need
         # to also open the result in the user's separate default browser on finish.
         return AgentRuntime(
-            provider, browser_registry(browser, help_request), _with_memory(BROWSER_SYSTEM_PROMPT), agent_name="browser", on_event=on_event, observe=observe_browser
+            provider, browser_registry(browser, help_request, gate), _with_memory(BROWSER_SYSTEM_PROMPT), agent_name="browser", on_event=on_event, observe=observe_browser
         )
 
     def build_desktop_runtime() -> AgentRuntime:
         return AgentRuntime(
-            provider, desktop_registry(native, help_request), _with_memory(DESKTOP_SYSTEM_PROMPT), agent_name="desktop", on_event=on_event, observe=observe_desktop
+            provider, desktop_registry(native, help_request, gate), _with_memory(DESKTOP_SYSTEM_PROMPT), agent_name="desktop", on_event=on_event, observe=observe_desktop
         )
 
     def build_research_runtime() -> AgentRuntime:

@@ -17,6 +17,7 @@ export function AppShell() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [pausedBackendTaskId, setPausedBackendTaskId] = useState<string | null>(null);
   const [steps, setSteps] = useState<ActivityStep[]>([]);
+  const [approval, setApproval] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewFrame | null>(null);
   const stream = useRef<EventSource | null>(null);
   const lastSeq = useRef(0);
@@ -119,6 +120,7 @@ export function AppShell() {
       const isCancelled = response.ok && responseBody.error === "cancelled";
       const isError = !response.ok || (!isPaused && !isCancelled && !responseBody.success);
       setPausedBackendTaskId(isPaused ? responseBody.task_id : null);
+      setApproval(isPaused && responseBody.approval ? responseBody.approval.summary : null);
       finishTurn(
         taskId,
         {
@@ -140,6 +142,7 @@ export function AppShell() {
       );
     } catch (error) {
       setPausedBackendTaskId(null);
+      setApproval(null);
       finishTurn(
         taskId,
         {
@@ -159,11 +162,11 @@ export function AppShell() {
     await startRun(text);
   };
 
-  const handleResume = async () => {
+  const handleResume = async (decision?: "approve" | "deny") => {
     if (!pausedBackendTaskId || !activeTaskId) return;
     setTasks((prev) => prev.map((t) => (t.id === activeTaskId ? { ...t, status: "running" } : t)));
     openStream(pausedBackendTaskId, false);
-    await runAgent(activeTaskId, "/api/agent/resume", { task_id: pausedBackendTaskId });
+    await runAgent(activeTaskId, "/api/agent/resume", { task_id: pausedBackendTaskId, decision });
   };
 
   const handleNewTask = () => {
@@ -205,6 +208,7 @@ export function AppShell() {
             preview={preview}
             onSend={handleSend}
             onVoiceCommand={handleVoiceCommand}
+            approval={approval}
             onResume={handleResume}
             onStop={handleStop}
           />

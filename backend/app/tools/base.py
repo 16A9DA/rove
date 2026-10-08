@@ -155,6 +155,8 @@ class ToolExecutor:
 
         try:
             output = tool.handler(params)
+        except ToolError as exc:
+            return ToolResult(tool_call_id, name, str(exc), is_error=True)
         except NotImplementedError as exc:
             # a controller legitimately doesn't support this action (e.g. BrowserController
             # has no concept of open_application) — a normal error result, not a crash

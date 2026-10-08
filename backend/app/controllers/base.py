@@ -44,6 +44,10 @@ class ComputerController(ABC):
         # extract visible text so a non-vision model can "observe" without a screenshot
         raise NotImplementedError
 
+    def element_at(self, x: int, y: int) -> str | None:
+        # label of whatever is under (x, y), for the permission gate; None when unknown
+        return None
+
     @abstractmethod
     def describe_ui(self) -> list[dict]:
         # list on-screen interactive elements (role/label/position/size) so click/type

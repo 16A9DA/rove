@@ -13,13 +13,14 @@ from fastapi.responses import Response, StreamingResponse
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
-from app import paused_runs
+from app import paused_runs, permissions
 from app.activity import Activity, ActivityBus
 from agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
 from app.help_request import HelpRequest
 from app.keyboard_watcher import CommandKeyWatcher, InputInterruptWatcher
 from app.memory import MemoryService
+from app.permissions import PermissionGate
 from app.providers import (
     AnthropicProvider,
     LLMProvider,
@@ -37,6 +38,7 @@ from app.schemas import (
     AgentRunResponse,
     AppSettingsResponse,
     AppSettingsUpdate,
+    ApprovalResponse,
     ModelInfo,
     ModelListResponse,
     ToolCallResponse,
@@ -175,6 +177,10 @@ def get_activity(
     return Activity(bus, watcher.is_interrupted)
 
 
+def get_permission_gate(help_request: HelpRequest = Depends(get_help_request)) -> PermissionGate:
+    return PermissionGate(help_request)
+
+
 def get_orchestrator(
     provider: LLMProvider = Depends(get_provider),
     browser: BrowserController = Depends(get_browser_controller),
@@ -182,6 +188,7 @@ def get_orchestrator(
     memory: MemoryService = Depends(get_memory_service),
     activity: Activity = Depends(get_activity),
     help_request: HelpRequest = Depends(get_help_request),
+    gate: PermissionGate = Depends(get_permission_gate),
 ) -> AgentRuntime:
     return orchestrator_runtime(
         provider,
@@ -191,11 +198,14 @@ def get_orchestrator(
         cancel_check=activity.cancel_check,
         help_request=help_request,
         on_event=activity.emit,
+        gate=gate,
     )
 
 
 def _run_response(result) -> AgentRunResponse:
+    approval = permissions.pending(result.task_id)
     return AgentRunResponse(
+        approval=ApprovalResponse(tool=approval.tool, summary=approval.summary) if approval else None,
         task_id=result.task_id,
         success=result.success,
         final_message=result.final_message,
@@ -229,9 +239,11 @@ def agent_run(
     watcher: InputInterruptWatcher = Depends(get_input_watcher),
     help_request: HelpRequest = Depends(get_help_request),
     activity: Activity = Depends(get_activity),
+    gate: PermissionGate = Depends(get_permission_gate),
 ) -> AgentRunResponse:
     task_id = request.task_id or str(uuid.uuid4())
     activity.bind(task_id)
+    gate.bind(task_id)
     activity.emit({"type": "run_started", "label": "Starting"})
     watcher.start()
     try:
@@ -248,11 +260,26 @@ def agent_resume(
     watcher: InputInterruptWatcher = Depends(get_input_watcher),
     help_request: HelpRequest = Depends(get_help_request),
     activity: Activity = Depends(get_activity),
+    gate: PermissionGate = Depends(get_permission_gate),
 ) -> AgentRunResponse:
+    approval = permissions.pending(request.task_id)
+    if approval is not None and request.decision not in ("approve", "deny"):
+        raise HTTPException(status_code=400, detail="this run is waiting for an approve/deny decision")
     messages = paused_runs.pop(request.task_id)
     if messages is None:
         raise HTTPException(status_code=404, detail="no paused run for that task_id")
+    if approval is not None:
+        approved = request.decision == "approve"
+        permissions.resolve(request.task_id, approved)
+        messages.append(
+            {
+                "role": "user",
+                "content": f"The user {'approved' if approved else 'denied'}: {approval.summary}. "
+                + ("You may now perform it." if approved else "Do not do it; choose another way or finish."),
+            }
+        )
     activity.bind(request.task_id)
+    gate.bind(request.task_id)
     activity.emit({"type": "run_started", "label": "Resuming"})
     watcher.start()
     try:
@@ -336,6 +363,8 @@ def _run_quick_goal(goal: str, on_step) -> tuple[bool, str]:
     activity = Activity(get_activity_bus(), watcher.is_interrupted)
     task_id = str(uuid.uuid4())
     activity.bind(task_id)
+    gate = PermissionGate(help_request)
+    gate.bind(task_id)
 
     def on_event(event: dict) -> None:
         activity.emit(event)
@@ -350,6 +379,7 @@ def _run_quick_goal(goal: str, on_step) -> tuple[bool, str]:
         cancel_check=watcher.is_interrupted,
         help_request=help_request,
         on_event=on_event,
+        gate=gate,
     )
     watcher.start()
     try:

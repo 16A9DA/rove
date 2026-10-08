@@ -124,6 +124,38 @@ class BrowserController(ComputerController):
         # ponytail: flat length cap, not smart summarization — raise if a real task needs more
         return self._run(lambda: self.page.inner_text("body"))[:5000]
 
+    def element_at(self, x: int, y: int) -> str | None:
+        # innermost clickable under the point: its visible text/label, plus the text of the
+        # submit buttons / action of the form it would submit
+        return self._run(
+            lambda: self.page.evaluate(
+                """([x, y]) => {
+                    const el = document.elementFromPoint(x, y);
+                    if (!el) return null;
+                    const target = el.closest('button, a, input, select, [role=button], [role=menuitem]') || el;
+                    const text = (t) => (t.innerText || t.value || t.getAttribute('aria-label') || t.title || '').trim();
+                    const form = target.closest('form');
+                    const submits = form ? [...form.querySelectorAll('[type=submit], button:not([type])')].map(text).join(' ') : '';
+                    const submitting = form && (target.matches('[type=submit]') || (target.tagName === 'BUTTON' && !target.type) || target.type === 'submit');
+                    return [text(target), submitting ? submits + ' ' + (form.action || '') : ''].join(' ').trim();
+                }""",
+                [x, y],
+            )
+        )
+
+    def focused_form_hint(self) -> str | None:
+        # text a keyboard Enter would submit: the focused control's form action + its submit buttons
+        return self._run(
+            lambda: self.page.evaluate(
+                """() => {
+                    const form = document.activeElement && document.activeElement.closest('form');
+                    if (!form) return null;
+                    const text = (t) => (t.innerText || t.value || t.getAttribute('aria-label') || '').trim();
+                    return [form.action || '', ...[...form.querySelectorAll('[type=submit], button:not([type])')].map(text)].join(' ');
+                }"""
+            )
+        )
+
     def describe_ui(self) -> list[dict]:
         # a browser agent already has get_text/DOM-level grounding; this is native-only
         raise NotImplementedError("BrowserController has get_text instead of describe_ui")

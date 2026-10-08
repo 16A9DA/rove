@@ -30,6 +30,7 @@ class AgentRunRequest(BaseModel):
 
 class AgentResumeRequest(BaseModel):
     task_id: str
+    decision: str | None = None  # "approve" | "deny" when the run paused for an approval
 
 
 class ActionSummaryResponse(BaseModel):
@@ -39,6 +40,11 @@ class ActionSummaryResponse(BaseModel):
     is_error: bool
 
 
+class ApprovalResponse(BaseModel):
+    tool: str
+    summary: str
+
+
 class AgentRunResponse(BaseModel):
     task_id: str
     success: bool
@@ -46,6 +52,7 @@ class AgentRunResponse(BaseModel):
     actions: list[ActionSummaryResponse]
     error: str | None = None
     question: str | None = None
+    approval: ApprovalResponse | None = None
 
 
 class TranscribeResponse(BaseModel):
