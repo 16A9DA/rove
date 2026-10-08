@@ -1,12 +1,15 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage } = require("electron");
+const { app, BrowserWindow, Tray, Menu, nativeImage, screen } = require("electron");
 const path = require("path");
 
 const DEV_URL = "http://localhost:3000";
 const PROD_ENTRY = path.join(__dirname, "..", "frontend", "out", "index.html");
+const POPOVER_ENTRY = path.join(__dirname, "..", "frontend", "out", "popover.html");
+const QUICK_EVENTS_URL = "http://127.0.0.1:8000/api/quick/events";
 const isDev = process.env.ROVE_DEV === "1";
 
 let mainWindow = null;
 let tray = null;
+let popover = null;
 app.isQuitting = false;
 
 function createWindow() {
@@ -48,6 +51,64 @@ function createWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+}
+
+function createPopover() {
+  popover = new BrowserWindow({
+    width: 340,
+    height: 150,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  popover.setAlwaysOnTop(true, "screen-saver");
+  popover.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  if (isDev) {
+    popover.loadURL(`${DEV_URL}/popover`);
+  } else {
+    popover.loadFile(POPOVER_ENTRY);
+  }
+}
+
+function showPopover() {
+  if (!popover) return;
+  const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const { width } = popover.getBounds();
+  popover.setPosition(Math.round(workArea.x + (workArea.width - width) / 2), workArea.y + 48);
+  popover.showInactive();
+}
+
+// Backend owns the Command-hold state machine; this only mirrors it into show/hide.
+async function watchQuickEvents() {
+  while (!app.isQuitting) {
+    try {
+      const response = await fetch(QUICK_EVENTS_URL);
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for await (const chunk of response.body) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop();
+        for (const frame of frames) {
+          if (!frame.startsWith("data: ")) continue;
+          const { state } = JSON.parse(frame.slice(6));
+          if (state === "idle") popover?.hide();
+          else showPopover();
+        }
+      }
+    } catch {
+      // backend not up yet; retry below
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
 }
 
 function createTray() {
@@ -114,6 +175,8 @@ app.whenReady().then(() => {
   createAppMenu();
   createTray();
   createWindow();
+  createPopover();
+  watchQuickEvents();
 
   app.on("activate", createWindow);
 });

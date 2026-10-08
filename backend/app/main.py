@@ -1,9 +1,13 @@
+import json
 import logging
+import queue
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -12,7 +16,7 @@ from app import paused_runs
 from agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
 from app.help_request import HelpRequest
-from app.keyboard_watcher import InputInterruptWatcher
+from app.keyboard_watcher import CommandKeyWatcher, InputInterruptWatcher
 from app.memory import MemoryService
 from app.providers import (
     AnthropicProvider,
@@ -36,10 +40,24 @@ from app.schemas import (
     ToolCallResponse,
     TranscribeResponse,
 )
+from app.quick_command import QuickCommand
 from app.settings_store import SettingsStore
 from app.stt import MoonshineSTT, SpeechToTextProvider, STTError
 
-app = FastAPI(title="Rove Agent API")
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    quick = get_quick_command()
+    watcher = CommandKeyWatcher(quick.on_hold, quick.on_release, get_native_controller().source_state_id)
+    if not watcher.start():
+        log.warning("Command push-to-talk unavailable: grant Input Monitoring/Accessibility to this process")
+    yield
+    watcher.stop()
+
+
+app = FastAPI(title="Rove Agent API", lifespan=lifespan)
 
 # Local desktop app only (Electron/localhost frontend calling a 127.0.0.1 backend),
 # never exposed publicly — allow-all is fine and avoids per-origin config.
@@ -222,3 +240,52 @@ def stt_stop(stt: SpeechToTextProvider = Depends(get_stt_provider)) -> Transcrib
     except STTError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TranscribeResponse(transcript=transcript)
+
+
+def _run_quick_goal(goal: str) -> tuple[bool, str]:
+    try:
+        provider = get_provider(get_settings_store())
+    except HTTPException as exc:
+        return False, str(exc.detail)
+    native = get_native_controller()
+    watcher = InputInterruptWatcher(native.source_state_id)
+    help_request = HelpRequest()
+    runtime = orchestrator_runtime(
+        provider,
+        browser=get_browser_controller(),
+        native=native,
+        memory=get_memory_service(),
+        cancel_check=watcher.is_interrupted,
+        help_request=help_request,
+    )
+    watcher.start()
+    try:
+        result = runtime.run(goal, cancel_check=watcher.is_interrupted, question_check=help_request.question)
+    finally:
+        watcher.stop()
+    if result.question:
+        return False, result.question
+    if result.error == "paused":
+        return False, "Paused: mouse or keyboard touched."
+    return result.success, result.final_message or result.error or ""
+
+
+@lru_cache
+def get_quick_command() -> QuickCommand:
+    return QuickCommand(get_stt_provider(), _run_quick_goal)
+
+
+@app.get("/api/quick/events")
+def quick_events(quick: QuickCommand = Depends(get_quick_command)) -> StreamingResponse:
+    def stream():
+        q = quick.subscribe()
+        try:
+            while True:
+                try:
+                    yield f"data: {json.dumps(q.get(timeout=15))}\n\n"
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+        finally:
+            quick.unsubscribe(q)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
