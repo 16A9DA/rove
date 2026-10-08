@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, TypeVar
 
-from playwright.sync_api import Browser, Page, Playwright, sync_playwright
+from playwright.sync_api import Browser, Error as PlaywrightError, Page, Playwright, sync_playwright
 
 from app.controllers.base import ComputerController
 
@@ -40,8 +40,23 @@ class BrowserController(ComputerController):
         # different thread". Route every Playwright touch through one dedicated thread.
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="playwright")
 
+    def _reset_impl(self) -> None:
+        for closer in (lambda: self._browser and self._browser.close(), lambda: self._playwright and self._playwright.stop()):
+            try:
+                closer()
+            except Exception:
+                pass
+        self._playwright = self._browser = self._page = None
+
     def _run(self, fn: Callable[[], T]) -> T:
-        return self._executor.submit(fn).result()
+        try:
+            return self._executor.submit(fn).result()
+        except PlaywrightError as exc:
+            if any(marker in str(exc) for marker in ("has been closed", "Target closed", "disconnected")):
+                # Next page access relaunches Chrome lazily; tell the agent so it reloads its page.
+                self._executor.submit(self._reset_impl).result()
+                raise RuntimeError("The browser window was closed or crashed. Rove reset it; call open_url to load the page again.") from exc
+            raise
 
     def _launch_impl(self) -> None:
         self._playwright = sync_playwright().start()
@@ -49,6 +64,8 @@ class BrowserController(ComputerController):
         # bundled Chromium — headed so a "open Chrome" task is actually visible.
         self._browser = self._playwright.chromium.launch(channel="chrome", headless=self._headless)
         self._page = self._browser.new_page()
+        # ponytail: unexpected alert/confirm dialogs are dismissed so they can't freeze the page; popups/new tabs are not followed yet.
+        self._page.on("dialog", lambda dialog: dialog.dismiss())
 
     def launch(self) -> None:
         self._run(self._launch_impl)
@@ -79,7 +96,7 @@ class BrowserController(ComputerController):
         return self._page
 
     def navigate(self, url: str) -> None:
-        self._run(lambda: self.page.goto(url))
+        self._run(lambda: self.page.goto(url, wait_until="domcontentloaded", timeout=20_000))
 
     @property
     def current_url(self) -> str:

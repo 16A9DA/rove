@@ -23,6 +23,14 @@ DEFAULT_TIMEOUT_SECONDS = 240.0
 # Tools that change what's on screen — a preview frame is captured after these (not after reads/waits).
 OBSERVED_TOOLS = {"open_url", "click", "type", "scroll", "keypress", "open_application", "focus_application"}
 FRAME_MIN_INTERVAL_SECONDS = 1.0
+
+# Recovery: nudge the model off a rut, then give up rather than burn the step budget.
+# Only tools that act on the world are watched for repeats (scroll/wait/screenshot repeat legitimately).
+REPEAT_WATCHED_TOOLS = {"open_url", "click", "type", "keypress", "open_application", "focus_application"}
+REPEAT_HINT_AT = 3
+REPEAT_ABORT_AT = 6
+ERROR_HINT_AT = 3
+ERROR_ABORT_AT = 7
 # Retried once each: 400 is usually a one-off tool-call parse failure on the model's
 # side; 429/503 are transient rate-limit/overload that can clear within a step. 401/504/
 # other 502s are not retried here — they're not going to resolve within one agent step.
@@ -123,6 +131,9 @@ class AgentRuntime:
         ]
         actions: list[ActionSummary] = []
         deadline = time.monotonic() + self._timeout_seconds
+        recent_actions: list[str] = []
+        error_streak = 0
+        empty_replies = 0
 
         for step in range(self._max_steps):
             question = question_check() if question_check is not None else None
@@ -146,8 +157,14 @@ class AgentRuntime:
             assert response is not None
 
             if not response.tool_calls:
-                # model answered directly instead of calling finish — treat as done
-                return AgentResult(task_id, True, response.content, actions)
+                if (response.content or "").strip():
+                    # model answered directly instead of calling finish — treat as done
+                    return AgentResult(task_id, True, response.content, actions)
+                empty_replies += 1
+                if empty_replies > 1:
+                    return AgentResult(task_id, False, None, actions, error="the model returned empty replies")
+                messages.append({"role": "user", "content": "Your last reply was empty. Call a tool to continue, or call finish."})
+                continue
 
             messages.append(
                 {
@@ -160,6 +177,7 @@ class AgentRuntime:
                 }
             )
 
+            hint: str | None = None
             for tool_call in response.tool_calls:
                 label = describe_tool(tool_call.name, tool_call.arguments)
                 self._emit("step", id=tool_call.id, label=label, status="running")
@@ -169,6 +187,32 @@ class AgentRuntime:
                     self._emit_frame()
                 actions.append(ActionSummary(tool_call.name, tool_call.arguments, result.content, result.is_error))
                 messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result.content})
+                logger.info("step %d agent=%s tool=%s error=%s", step, self._agent_name, tool_call.name, result.is_error)
+
+                # A permission block is a pause waiting to happen, not a failure to recover from.
+                blocked = result.is_error and result.content.startswith("Blocked:")
+                error_streak = error_streak + 1 if result.is_error and not blocked else 0
+                if error_streak >= ERROR_ABORT_AT:
+                    return AgentResult(task_id, False, None, actions, error=f"too many failed actions in a row ({error_streak})")
+                if error_streak == ERROR_HINT_AT:
+                    hint = (
+                        "Several actions in a row have failed. Re-check the current state first (screenshot, "
+                        "describe_ui or get_text), then try a different approach, or ask_for_help if you are stuck."
+                    )
+                if tool_call.name in REPEAT_WATCHED_TOOLS:
+                    recent_actions.append(f"{tool_call.name}:{tool_call.arguments}")
+                    repeats = 0
+                    for earlier in reversed(recent_actions):
+                        if earlier != recent_actions[-1]:
+                            break
+                        repeats += 1
+                    if repeats >= REPEAT_ABORT_AT:
+                        return AgentResult(task_id, False, None, actions, error=f"stuck repeating {tool_call.name}")
+                    if repeats == REPEAT_HINT_AT:
+                        hint = (
+                            f"You have now made the identical {tool_call.name} call {repeats} times in a row without "
+                            "progress. Do something different: look at the screen again, pick another target, or ask_for_help."
+                        )
                 if result.image_base64:
                     # Every step resends the full message list, so old screenshots left in
                     # place would compound request size/latency step after step. Only the
@@ -193,5 +237,8 @@ class AgentRuntime:
                     if self._on_finish is not None:
                         self._on_finish()
                     return AgentResult(task_id, payload.get("success", True), payload.get("result"), actions)
+
+            if hint:
+                messages.append({"role": "user", "content": hint})
 
         return AgentResult(task_id, False, None, actions, error=f"exceeded max steps ({self._max_steps})")
