@@ -102,6 +102,8 @@ async function watchQuickEvents() {
           const { state } = JSON.parse(frame.slice(6));
           if (state === "idle") popover?.hide();
           else showPopover();
+          // Menu-bar feedback while a Command-hold task is active.
+          tray?.setTitle(state === "idle" ? "" : ` ${state === "executing" ? "working" : state}`);
         }
       }
     } catch {

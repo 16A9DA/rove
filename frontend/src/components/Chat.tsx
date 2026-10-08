@@ -12,6 +12,7 @@ export function Chat({
   agentState,
   steps,
   preview,
+  loading,
   approval,
   rating,
   onFeedback,
@@ -24,6 +25,7 @@ export function Chat({
   agentState: AgentState;
   steps: ActivityStep[];
   preview: PreviewFrame | null;
+  loading: boolean;
   approval: string | null;
   rating: "up" | "down" | null;
   onFeedback?: (rating: "up" | "down") => void;
@@ -35,7 +37,7 @@ export function Chat({
   const inputDisabled = agentState === "thinking" || agentState === "executing";
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
         <h1 className="text-sm font-medium text-white/80">Current Task</h1>
         <div className="flex items-center gap-2">
@@ -76,7 +78,7 @@ export function Chat({
         </div>
       </div>
 
-      <MessageList messages={messages} agentState={agentState} onExampleClick={onSend} />
+      <MessageList messages={messages} agentState={agentState} loading={loading} onExampleClick={onSend} />
 
       {(agentState === "complete" || agentState === "error") && messages.length > 0 && onFeedback && (
         <div className="mx-6 mb-2 flex items-center gap-2 text-xs text-white/40">

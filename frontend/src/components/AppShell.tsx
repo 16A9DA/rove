@@ -20,20 +20,26 @@ export function AppShell() {
   const [pausedBackendTaskId, setPausedBackendTaskId] = useState<string | null>(null);
   const [steps, setSteps] = useState<ActivityStep[]>([]);
   const [approval, setApproval] = useState<string | null>(null);
+  const [backendDown, setBackendDown] = useState(false);
+  const [loadingTask, setLoadingTask] = useState(false);
   const [rating, setRating] = useState<"up" | "down" | null>(null);
   const [preview, setPreview] = useState<PreviewFrame | null>(null);
   const stream = useRef<EventSource | null>(null);
   const lastSeq = useRef(0);
   const runningBackendId = useRef<string | null>(null);
 
-  useEffect(() => {
+  const loadTasks = () =>
     fetch(`${ROVE_API_BASE}/api/tasks`)
       .then((response) => response.json())
-      .then((rows: { id: string; title: string; status: Task["status"]; created_at: number }[]) =>
+      .then((rows: { id: string; title: string; status: Task["status"]; created_at: number }[]) => {
         // a run still marked "running" at startup died with the previous process
-        setTasks(rows.map((r) => ({ id: r.id, title: titleFor(r.title), status: r.status === "running" ? "error" : r.status, createdAt: r.created_at * 1000 }))),
-      )
-      .catch(() => undefined);
+        setTasks(rows.map((r) => ({ id: r.id, title: titleFor(r.title), status: r.status === "running" ? "error" : r.status, createdAt: r.created_at * 1000 })));
+        setBackendDown(false);
+      })
+      .catch(() => setBackendDown(true));
+
+  useEffect(() => {
+    loadTasks();
   }, []);
 
   const beginTurn = (text: string): string => {
@@ -203,6 +209,7 @@ export function AppShell() {
     stream.current?.close();
     setPreview(null);
     setApproval(null);
+    setLoadingTask(true);
     try {
       const detail = await (await fetch(`${ROVE_API_BASE}/api/tasks/${id}`)).json();
       const restored: Message[] = [{ id: crypto.randomUUID(), role: "user", content: detail.goal, createdAt: detail.created_at * 1000 }];
@@ -218,8 +225,32 @@ export function AppShell() {
       setMessages([]);
       setSteps([]);
       setAgentState("idle");
+    } finally {
+      setLoadingTask(false);
     }
   };
+
+  const handleDeleteTask = async (id: string) => {
+    await fetch(`${ROVE_API_BASE}/api/tasks/${id}`, { method: "DELETE" }).catch(() => undefined);
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+    if (id === activeTaskId) handleNewTask();
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey && event.key === "n") {
+        event.preventDefault();
+        handleNewTask();
+      } else if (event.metaKey && event.key === ",") {
+        event.preventDefault();
+        setView("settings");
+      } else if (event.key === "Escape" && (agentState === "thinking" || agentState === "executing")) {
+        void handleStop();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
 
   return (
     <div className="flex h-full">
@@ -227,17 +258,27 @@ export function AppShell() {
         tasks={tasks}
         activeTaskId={activeTaskId}
         onSelectTask={handleSelectTask}
+        onDeleteTask={handleDeleteTask}
         onNewTask={handleNewTask}
         onOpenSettings={() => setView("settings")}
       />
 
-      <main className="flex-1 overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden">
+        {backendDown && (
+          <div role="alert" className="flex items-center justify-between gap-3 border-b border-red-400/20 bg-red-400/10 px-6 py-2 text-sm text-red-200">
+            <span>Can&apos;t reach the Rove backend. Start it, then retry.</span>
+            <button onClick={() => void loadTasks()} className="rounded-full border border-red-400/30 px-3 py-1 hover:bg-red-400/10">
+              Retry
+            </button>
+          </div>
+        )}
         {view === "chat" ? (
           <Chat
             messages={messages}
             agentState={agentState}
             steps={steps}
             preview={preview}
+            loading={loadingTask}
             onSend={handleSend}
             onVoiceCommand={handleVoiceCommand}
             approval={approval}

@@ -12,10 +12,12 @@ const EXAMPLE_PROMPTS = [
 export function MessageList({
   messages,
   agentState,
+  loading,
   onExampleClick,
 }: {
   messages: Message[];
   agentState: AgentState;
+  loading: boolean;
   onExampleClick: (prompt: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -23,6 +25,14 @@ export function MessageList({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, agentState]);
+
+  if (loading) {
+    return (
+      <div role="status" className="flex flex-1 items-center justify-center text-sm text-white/40">
+        Loading task…
+      </div>
+    );
+  }
 
   if (messages.length === 0) {
     return (
@@ -50,7 +60,7 @@ export function MessageList({
   }
 
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto px-6 py-6">
+    <div role="log" aria-live="polite" aria-label="Conversation" className="flex-1 space-y-4 overflow-y-auto px-6 py-6">
       {messages.map((message) => (
         <div
           key={message.id}

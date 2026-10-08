@@ -24,7 +24,7 @@ export function AgentStatus({ state }: { state: AgentState }) {
   const pulsing = state === "listening" || state === "thinking" || state === "executing";
 
   return (
-    <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-white/70">
+    <div role="status" aria-live="polite" className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-white/70">
       <span className="relative flex h-2 w-2">
         {pulsing && (
           <span

@@ -43,7 +43,7 @@ export default function PopoverPage() {
 
   return (
     <div className="flex h-full items-center justify-center p-3">
-      <div className="flex w-full flex-col gap-2 rounded-2xl border border-white/10 bg-[#111113]/95 px-5 py-4 shadow-2xl backdrop-blur">
+      <div role="status" aria-live="polite" className="animate-message-in flex w-full flex-col gap-2 rounded-2xl border border-white/10 bg-[#111113]/95 px-5 py-4 shadow-2xl backdrop-blur">
         <div className="flex items-center gap-2.5 text-sm font-medium text-white">
           <span className="relative flex h-2.5 w-2.5">
             {pulsing && (

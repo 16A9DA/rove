@@ -5,12 +5,14 @@ export function Sidebar({
   tasks,
   activeTaskId,
   onSelectTask,
+  onDeleteTask,
   onNewTask,
   onOpenSettings,
 }: {
   tasks: Task[];
   activeTaskId: string | null;
   onSelectTask: (id: string) => void;
+  onDeleteTask: (id: string) => void;
   onNewTask: () => void;
   onOpenSettings: () => void;
 }) {
@@ -26,6 +28,7 @@ export function Sidebar({
       <div className="px-3">
         <button
           onClick={onNewTask}
+          title="New task (⌘N)"
           className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/80 transition-colors duration-150 hover:bg-white/[0.08] active:scale-[0.98]"
         >
           + New Task
@@ -34,12 +37,13 @@ export function Sidebar({
 
       <nav className="mt-4 flex-1 overflow-y-auto px-3">
         <p className="px-3 pb-1 text-xs font-medium tracking-wide text-white/30">TASK HISTORY</p>
-        <TaskHistory tasks={tasks} activeTaskId={activeTaskId} onSelect={onSelectTask} />
+        <TaskHistory tasks={tasks} activeTaskId={activeTaskId} onSelect={onSelectTask} onDelete={onDeleteTask} />
       </nav>
 
       <div className="border-t border-white/10 p-3">
         <button
           onClick={onOpenSettings}
+          title="Settings (⌘,)"
           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/60 transition-colors duration-150 hover:bg-white/[0.04] hover:text-white/90"
         >
           Settings
