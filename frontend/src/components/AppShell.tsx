@@ -20,6 +20,7 @@ export function AppShell() {
   const [pausedBackendTaskId, setPausedBackendTaskId] = useState<string | null>(null);
   const [steps, setSteps] = useState<ActivityStep[]>([]);
   const [approval, setApproval] = useState<string | null>(null);
+  const [rating, setRating] = useState<"up" | "down" | null>(null);
   const [preview, setPreview] = useState<PreviewFrame | null>(null);
   const stream = useRef<EventSource | null>(null);
   const lastSeq = useRef(0);
@@ -53,6 +54,7 @@ export function AppShell() {
     };
     setTasks((prev) => [newTask, ...prev]);
     setActiveTaskId(taskId);
+    setRating(null);
 
     setAgentState("thinking");
     return taskId;
@@ -102,6 +104,16 @@ export function AppShell() {
   const handleSend = async (text: string) => {
     if (agentState === "thinking" || agentState === "executing") return;
     await startRun(text);
+  };
+
+  const handleFeedback = async (value: "up" | "down") => {
+    if (!activeTaskId) return;
+    setRating(value);
+    await fetch(`${ROVE_API_BASE}/api/tasks/${activeTaskId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating: value }),
+    }).catch(() => undefined);
   };
 
   const handleStop = async () => {
@@ -199,6 +211,7 @@ export function AppShell() {
       }
       setMessages(restored);
       setSteps(detail.steps);
+      setRating(detail.rating ?? null);
       setPausedBackendTaskId(detail.status === "paused" ? id : null);
       setAgentState(detail.status === "paused" ? "paused" : detail.status === "error" ? "error" : "complete");
     } catch {
@@ -228,6 +241,8 @@ export function AppShell() {
             onSend={handleSend}
             onVoiceCommand={handleVoiceCommand}
             approval={approval}
+            rating={rating}
+            onFeedback={handleFeedback}
             onResume={handleResume}
             onStop={handleStop}
           />

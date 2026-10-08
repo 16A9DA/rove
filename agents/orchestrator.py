@@ -57,6 +57,7 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "next subtask yourself rather than saying 'what you found earlier', since each "
     "specialist starts with no memory of the others, and check each result before "
     "moving on. "
+    "Use recall to look up older notes by keyword when they might matter. "
     "Use remember to save anything worth recalling on future tasks: personal facts "
     "or preferences about the user (category personal), a notable outcome of this "
     "task (episodic), a reusable way of doing something (workflow), or a durable "
@@ -112,6 +113,10 @@ class SubtaskParams(BaseModel):
     subtask: str
 
 
+class RecallParams(BaseModel):
+    query: str
+
+
 class RememberParams(BaseModel):
     category: MemoryCategory
     content: str
@@ -148,6 +153,14 @@ def _make_remember(memory: MemoryService) -> Callable[[BaseModel], dict[str, Any
         assert isinstance(params, RememberParams)
         memory.remember(params.category, params.content)
         return {"remembered": params.content, "category": params.category.value}
+
+    return handler
+
+
+def _make_recall(memory: MemoryService) -> Callable[[BaseModel], dict[str, Any]]:
+    def handler(params: BaseModel) -> dict[str, Any]:
+        assert isinstance(params, RecallParams)
+        return {"memories": memory.search(params.query)}
 
     return handler
 
@@ -215,6 +228,7 @@ def orchestrator_runtime(
     registry.register(Tool("delegate_desktop", "Delegate a subtask to the native-application specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_desktop_runtime, cancel_check, help_request.question)))
     registry.register(Tool("delegate_files", "Delegate a subtask to the files specialist agent (read, find, move, copy, write, trash files in Desktop/Documents/Downloads).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_files_runtime, cancel_check, help_request.question)))
     registry.register(Tool("delegate_research", "Delegate a subtask to the research specialist agent (reads a URL without a browser).", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_research_runtime, cancel_check, help_request.question)))
+    registry.register(Tool("recall", "Search your saved memories by keywords (older or less recent than what is in your prompt).", RecallParams, ToolRiskLevel.LOW, _make_recall(memory)))
     registry.register(Tool("remember", "Save something worth recalling on future tasks.", RememberParams, ToolRiskLevel.LOW, _make_remember(memory)))
     registry.register(Tool("ask_for_help", ASK_FOR_HELP_DESCRIPTION, AskForHelpParams, ToolRiskLevel.LOW, make_ask_for_help(help_request)))
     registry.register(Tool("finish", "Report the whole goal as complete with a result.", FinishParams, ToolRiskLevel.LOW, finish))

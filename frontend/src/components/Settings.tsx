@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MemoryList } from "@/components/MemoryList";
 import { ROVE_API_BASE } from "@/lib/roveApi";
 
 type Provider = "anthropic" | "openai";
@@ -142,6 +143,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
         </button>
         {saveState === "saved" && <p className="text-sm text-emerald-400">Saved.</p>}
         {saveState === "error" && <p className="text-sm text-red-400">Could not save settings.</p>}
+
+        <MemoryList />
 
         <div>
           <p className="mb-1 text-sm text-white/80">Permissions</p>

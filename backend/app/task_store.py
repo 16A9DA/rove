@@ -46,6 +46,7 @@ MIGRATIONS = [
     );
     CREATE INDEX idx_tasks_updated ON tasks(updated_at DESC);
     """,
+    "ALTER TABLE tasks ADD COLUMN rating TEXT;",
 ]
 
 _RUN_STATUS = {"ok": "complete", "error": "error", "paused": "paused", "cancelled": "complete"}
@@ -112,7 +113,7 @@ class TaskStore:
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
         with self._lock:
-            row = self._conn.execute("SELECT goal, status, result, is_error, created_at FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            row = self._conn.execute("SELECT goal, status, result, is_error, created_at, rating FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if row is None:
                 return None
             steps = self._conn.execute(
@@ -125,8 +126,14 @@ class TaskStore:
             "result": row[2],
             "is_error": bool(row[3]),
             "created_at": row[4],
+            "rating": row[5],
             "steps": [{"id": s[0], "agent": s[1], "label": s[2], "status": s[3]} for s in steps],
         }
+
+    def set_rating(self, task_id: str, rating: str) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE tasks SET rating = ? WHERE id = ?", (rating, task_id))
+            self._conn.commit()
 
     def delete_task(self, task_id: str) -> bool:
         with self._lock:

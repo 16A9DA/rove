@@ -13,6 +13,8 @@ export function Chat({
   steps,
   preview,
   approval,
+  rating,
+  onFeedback,
   onSend,
   onVoiceCommand,
   onResume,
@@ -23,6 +25,8 @@ export function Chat({
   steps: ActivityStep[];
   preview: PreviewFrame | null;
   approval: string | null;
+  rating: "up" | "down" | null;
+  onFeedback?: (rating: "up" | "down") => void;
   onSend: (text: string) => void;
   onVoiceCommand: (text: string) => void;
   onResume?: (decision?: "approve" | "deny") => void;
@@ -73,6 +77,24 @@ export function Chat({
       </div>
 
       <MessageList messages={messages} agentState={agentState} onExampleClick={onSend} />
+
+      {(agentState === "complete" || agentState === "error") && messages.length > 0 && onFeedback && (
+        <div className="mx-6 mb-2 flex items-center gap-2 text-xs text-white/40">
+          {rating ? (
+            <span>Thanks, noted.</span>
+          ) : (
+            <>
+              <span>Was this right?</span>
+              <button onClick={() => onFeedback("up")} className="rounded-full border border-white/10 px-2.5 py-1 hover:bg-white/[0.06]">
+                Yes
+              </button>
+              <button onClick={() => onFeedback("down")} className="rounded-full border border-white/10 px-2.5 py-1 hover:bg-white/[0.06]">
+                No
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <ComputerPreview frame={preview} steps={steps} />
       <ActivityFeed steps={steps} />

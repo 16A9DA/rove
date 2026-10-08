@@ -28,6 +28,10 @@ class AgentRunRequest(BaseModel):
     task_id: str | None = None
 
 
+class FeedbackRequest(BaseModel):
+    rating: str  # "up" | "down"
+
+
 class AgentResumeRequest(BaseModel):
     task_id: str
     decision: str | None = None  # "approve" | "deny" when the run paused for an approval

@@ -18,6 +18,7 @@ from app.activity import Activity, ActivityBus
 from agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
 from app.help_request import HelpRequest
+from app.learning import learn_from_run, record_feedback
 from app.keyboard_watcher import CommandKeyWatcher, InputInterruptWatcher
 from app.memory import MemoryService
 from app.permissions import PermissionGate
@@ -39,6 +40,7 @@ from app.schemas import (
     AppSettingsResponse,
     AppSettingsUpdate,
     ApprovalResponse,
+    FeedbackRequest,
     ModelInfo,
     ModelListResponse,
     ToolCallResponse,
@@ -231,6 +233,11 @@ def _finish_run(result, activity: Activity):
         result.error = "cancelled"
         result.question = None
     activity.clear_stop()
+    if result.error not in ("paused", "cancelled") and activity.task_id:
+        try:
+            learn_from_run(get_memory_service(), get_task_store(), activity.task_id, result.success, result.final_message)
+        except Exception as exc:
+            log.warning("learning from run failed: %s", type(exc).__name__)
     if result.error == "paused":
         status = "paused"
     elif result.error == "cancelled":
@@ -318,6 +325,32 @@ def get_task(task_id: str, store: TaskStore = Depends(get_task_store)) -> dict:
 def delete_task(task_id: str, store: TaskStore = Depends(get_task_store)) -> dict[str, str]:
     if not store.delete_task(task_id):
         raise HTTPException(status_code=404, detail="no such task")
+    return {"status": "deleted"}
+
+
+@app.post("/api/tasks/{task_id}/feedback")
+def task_feedback(
+    task_id: str,
+    request: FeedbackRequest,
+    store: TaskStore = Depends(get_task_store),
+    memory: MemoryService = Depends(get_memory_service),
+) -> dict[str, str]:
+    if request.rating not in ("up", "down"):
+        raise HTTPException(status_code=400, detail='rating must be "up" or "down"')
+    if not record_feedback(memory, store, task_id, request.rating):
+        raise HTTPException(status_code=404, detail="no such task")
+    return {"status": "recorded"}
+
+
+@app.get("/api/memories")
+def list_memories(memory: MemoryService = Depends(get_memory_service)) -> list[dict]:
+    return memory.list_all()
+
+
+@app.delete("/api/memories/{memory_id}")
+def delete_memory(memory_id: int, memory: MemoryService = Depends(get_memory_service)) -> dict[str, str]:
+    if not memory.delete(memory_id):
+        raise HTTPException(status_code=404, detail="no such memory")
     return {"status": "deleted"}
 
 
@@ -417,6 +450,11 @@ def _run_quick_goal(goal: str, on_step) -> tuple[bool, str]:
         result = runtime.run(goal, cancel_check=watcher.is_interrupted, question_check=help_request.question, task_id=task_id)
     finally:
         watcher.stop()
+    if result.error not in ("paused", "cancelled"):
+        try:
+            learn_from_run(get_memory_service(), get_task_store(), task_id, result.success, result.final_message)
+        except Exception as exc:
+            log.warning("learning from run failed: %s", type(exc).__name__)
     if result.question:
         return False, result.question
     if result.error == "paused":
