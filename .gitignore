@@ -31,3 +31,8 @@ build/
 out/
 
 .rove_token
+
+
+WORKLOG.md
+logs/
+scripts/
