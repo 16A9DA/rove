@@ -5,7 +5,7 @@ import { Chat } from "@/components/Chat";
 import { Settings } from "@/components/Settings";
 import { Sidebar } from "@/components/Sidebar";
 import { ROVE_API_BASE } from "@/lib/roveApi";
-import type { ActivityStep, AgentState, Message, Task } from "@/types/task";
+import type { ActivityStep, AgentState, Message, PreviewFrame, Task } from "@/types/task";
 
 type View = "chat" | "settings";
 
@@ -17,6 +17,7 @@ export function AppShell() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [pausedBackendTaskId, setPausedBackendTaskId] = useState<string | null>(null);
   const [steps, setSteps] = useState<ActivityStep[]>([]);
+  const [preview, setPreview] = useState<PreviewFrame | null>(null);
   const stream = useRef<EventSource | null>(null);
   const lastSeq = useRef(0);
   const runningBackendId = useRef<string | null>(null);
@@ -62,6 +63,7 @@ export function AppShell() {
     if (fresh) {
       lastSeq.current = 0;
       setSteps([]);
+      setPreview(null);
     }
     runningBackendId.current = backendTaskId;
     const source = new EventSource(`${ROVE_API_BASE}/api/agent/${backendTaskId}/events?after=${lastSeq.current}`);
@@ -73,6 +75,8 @@ export function AppShell() {
           const next: ActivityStep = { id: event.id, agent: event.agent, label: event.label, status: event.status };
           return prev.some((s) => s.id === event.id) ? prev.map((s) => (s.id === event.id ? next : s)) : [...prev, next];
         });
+      } else if (event.type === "frame") {
+        setPreview({ src: `${ROVE_API_BASE}/api/agent/${backendTaskId}/frame?n=${event.n}`, url: event.url, app: event.app });
       } else if (event.type === "run_finished") {
         source.close();
       }
@@ -165,6 +169,7 @@ export function AppShell() {
   const handleNewTask = () => {
     setMessages([]);
     setSteps([]);
+    setPreview(null);
     setActiveTaskId(null);
     setAgentState("idle");
     setView("chat");
@@ -176,6 +181,7 @@ export function AppShell() {
     setActiveTaskId(id);
     setMessages([]);
     setSteps([]);
+    setPreview(null);
     setAgentState("idle");
     setView("chat");
   };
@@ -196,6 +202,7 @@ export function AppShell() {
             messages={messages}
             agentState={agentState}
             steps={steps}
+            preview={preview}
             onSend={handleSend}
             onVoiceCommand={handleVoiceCommand}
             onResume={handleResume}

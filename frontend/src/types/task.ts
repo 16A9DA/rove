@@ -26,6 +26,12 @@ export type Task = {
   createdAt: number;
 };
 
+export type PreviewFrame = {
+  src: string;
+  url?: string;
+  app?: string;
+};
+
 export type ActivityStep = {
   id: string;
   agent: string;

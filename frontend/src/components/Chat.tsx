@@ -2,14 +2,16 @@
 
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { AgentStatus } from "@/components/AgentStatus";
+import { ComputerPreview } from "@/components/ComputerPreview";
 import { MessageInput } from "@/components/MessageInput";
 import { MessageList } from "@/components/MessageList";
-import type { ActivityStep, AgentState, Message } from "@/types/task";
+import type { ActivityStep, AgentState, Message, PreviewFrame } from "@/types/task";
 
 export function Chat({
   messages,
   agentState,
   steps,
+  preview,
   onSend,
   onVoiceCommand,
   onResume,
@@ -18,6 +20,7 @@ export function Chat({
   messages: Message[];
   agentState: AgentState;
   steps: ActivityStep[];
+  preview: PreviewFrame | null;
   onSend: (text: string) => void;
   onVoiceCommand: (text: string) => void;
   onResume?: () => void;
@@ -52,6 +55,7 @@ export function Chat({
 
       <MessageList messages={messages} agentState={agentState} onExampleClick={onSend} />
 
+      <ComputerPreview frame={preview} steps={steps} />
       <ActivityFeed steps={steps} />
 
       <MessageInput disabled={inputDisabled} onSend={onSend} onVoiceCommand={onVoiceCommand} />

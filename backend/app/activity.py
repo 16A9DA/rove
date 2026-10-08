@@ -31,6 +31,12 @@ def _clip(text: str) -> str:
     return text if len(text) <= LABEL_MAX else text[: LABEL_MAX - 1] + "…"
 
 
+# Query strings and fragments routinely carry tokens and ids; the preview only needs where we are.
+def safe_url(url: str) -> str:
+    parts = urlparse(url)
+    return f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else url.split("?")[0].split("#")[0]
+
+
 def _host(url: object) -> str:
     return urlparse(str(url)).netloc or str(url)
 
@@ -66,6 +72,7 @@ class ActivityBus:
         self._history: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
         self._subscribers: dict[str, list[queue.Queue]] = {}
         self._stops: set[str] = set()
+        self._frames: dict[str, tuple[bytes, int]] = {}
 
     def publish(self, task_id: str, event: dict[str, Any]) -> None:
         with self._lock:
@@ -75,6 +82,7 @@ class ActivityBus:
                 dropped, _ = self._history.popitem(last=False)
                 self._subscribers.pop(dropped, None)
                 self._stops.discard(dropped)
+                self._frames.pop(dropped, None)
             event = {**event, "seq": len(history) + 1}
             history.append(event)
             subscribers = list(self._subscribers.get(task_id, []))
@@ -93,6 +101,18 @@ class ActivityBus:
             subscribers = self._subscribers.get(task_id, [])
             if q in subscribers:
                 subscribers.remove(q)
+
+    # Latest preview frame per task, memory only (never written to disk).
+    def set_frame(self, task_id: str, image: bytes) -> int:
+        with self._lock:
+            n = self._frames.get(task_id, (b"", 0))[1] + 1
+            self._frames[task_id] = (image, n)
+            return n
+
+    def get_frame(self, task_id: str) -> bytes | None:
+        with self._lock:
+            frame = self._frames.get(task_id)
+        return frame[0] if frame else None
 
     def request_stop(self, task_id: str) -> None:
         with self._lock:
@@ -119,8 +139,12 @@ class Activity:
         self.task_id = task_id
 
     def emit(self, event: dict[str, Any]) -> None:
-        if self.task_id is not None:
-            self._bus.publish(self.task_id, event)
+        if self.task_id is None:
+            return
+        if event.get("type") == "frame":
+            event = dict(event)
+            event["n"] = self._bus.set_frame(self.task_id, event.pop("image"))
+        self._bus.publish(self.task_id, event)
 
     def cancel_check(self) -> bool:
         return self._interrupted() or self._bus.stop_requested(self.task_id)

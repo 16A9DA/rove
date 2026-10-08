@@ -19,6 +19,10 @@ DEFAULT_MAX_STEPS = 20
 # inference) run noticeably slower than text-only steps — raise further if screenshot-heavy
 # goals still time out, or make this model-aware if that becomes common.
 DEFAULT_TIMEOUT_SECONDS = 240.0
+
+# Tools that change what's on screen — a preview frame is captured after these (not after reads/waits).
+OBSERVED_TOOLS = {"open_url", "click", "type", "scroll", "keypress", "open_application", "focus_application"}
+FRAME_MIN_INTERVAL_SECONDS = 1.0
 # Retried once each: 400 is usually a one-off tool-call parse failure on the model's
 # side; 429/503 are transient rate-limit/overload that can clear within a step. 401/504/
 # other 502s are not retried here — they're not going to resolve within one agent step.
@@ -61,6 +65,7 @@ class AgentRuntime:
         on_finish: Callable[[], None] | None = None,
         agent_name: str = "agent",
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        observe: Callable[[], dict[str, Any] | None] | None = None,
     ) -> None:
         self._provider = provider
         self._registry = registry
@@ -71,10 +76,24 @@ class AgentRuntime:
         self._on_finish = on_finish
         self._agent_name = agent_name
         self._on_event = on_event
+        self._observe = observe
+        self._last_frame = 0.0
 
     def _emit(self, event_type: str, **fields: Any) -> None:
         if self._on_event is not None:
             self._on_event({"type": event_type, "agent": self._agent_name, **fields})
+
+    def _emit_frame(self) -> None:
+        if self._observe is None or time.monotonic() - self._last_frame < FRAME_MIN_INTERVAL_SECONDS:
+            return
+        try:
+            frame = self._observe()
+        except Exception as exc:
+            logger.debug("preview capture failed: %s", type(exc).__name__)
+            return
+        if frame:
+            self._last_frame = time.monotonic()
+            self._emit("frame", **frame)
 
     def run(
         self,
@@ -146,6 +165,8 @@ class AgentRuntime:
                 self._emit("step", id=tool_call.id, label=label, status="running")
                 result = self._executor.execute(tool_call.id, tool_call.name, tool_call.arguments)
                 self._emit("step", id=tool_call.id, label=label, status="error" if result.is_error else "ok")
+                if tool_call.name in OBSERVED_TOOLS and not result.is_error:
+                    self._emit_frame()
                 actions.append(ActionSummary(tool_call.name, tool_call.arguments, result.content, result.is_error))
                 messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result.content})
                 if result.image_base64:

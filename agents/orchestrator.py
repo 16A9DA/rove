@@ -11,6 +11,7 @@ from agents.base import AgentResult, AgentRuntime
 # full-length sub-agent runs, or one slow/rate-limited delegate call can burn through
 # the orchestrator's entire timeout before it even gets to react to the result.
 ORCHESTRATOR_TIMEOUT_SECONDS = 900.0
+from app.activity import safe_url
 from app.controllers import BrowserController, ComputerController, NativeComputerController
 from app.help_request import HelpRequest
 from app.memory import MemoryCategory, MemoryService
@@ -143,16 +144,25 @@ def orchestrator_runtime(
     def _with_memory(prompt: str) -> str:
         return f"{prompt}\n\n{remembered}" if remembered else prompt
 
+    # Preview frames: browser only if Chrome is already up (capturing must never launch it).
+    def observe_browser() -> dict[str, Any] | None:
+        if not browser.is_launched:
+            return None
+        return {"image": browser.screenshot(), "url": safe_url(browser.current_url)}
+
+    def observe_desktop() -> dict[str, Any] | None:
+        return {"image": native.screenshot(), "app": native.get_active_application()}
+
     def build_browser_runtime() -> AgentRuntime:
         # Real headed Chrome (BrowserController) is already visible on screen — no need
         # to also open the result in the user's separate default browser on finish.
         return AgentRuntime(
-            provider, browser_registry(browser, help_request), _with_memory(BROWSER_SYSTEM_PROMPT), agent_name="browser", on_event=on_event
+            provider, browser_registry(browser, help_request), _with_memory(BROWSER_SYSTEM_PROMPT), agent_name="browser", on_event=on_event, observe=observe_browser
         )
 
     def build_desktop_runtime() -> AgentRuntime:
         return AgentRuntime(
-            provider, desktop_registry(native, help_request), _with_memory(DESKTOP_SYSTEM_PROMPT), agent_name="desktop", on_event=on_event
+            provider, desktop_registry(native, help_request), _with_memory(DESKTOP_SYSTEM_PROMPT), agent_name="desktop", on_event=on_event, observe=observe_desktop
         )
 
     def build_research_runtime() -> AgentRuntime:

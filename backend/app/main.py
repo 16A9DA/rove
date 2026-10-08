@@ -8,7 +8,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -268,6 +268,14 @@ def agent_resume(
 def agent_stop(task_id: str, bus: ActivityBus = Depends(get_activity_bus)) -> dict[str, str]:
     bus.request_stop(task_id)
     return {"status": "stopping"}
+
+
+@app.get("/api/agent/{task_id}/frame")
+def agent_frame(task_id: str, bus: ActivityBus = Depends(get_activity_bus)) -> Response:
+    image = bus.get_frame(task_id)
+    if image is None:
+        raise HTTPException(status_code=404, detail="no preview frame for that task_id")
+    return Response(content=image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/agent/{task_id}/events")
