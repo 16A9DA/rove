@@ -26,6 +26,11 @@ class AgentMessageResponse(BaseModel):
 class AgentRunRequest(BaseModel):
     goal: str
     task_id: str | None = None
+    voice: bool = False  # started by voice: speak the result aloud (if enabled in Settings)
+
+
+class SpeakRequest(BaseModel):
+    text: str
 
 
 class FeedbackRequest(BaseModel):
@@ -68,6 +73,7 @@ class AppSettingsResponse(BaseModel):
     model: str | None
     has_anthropic_key: bool
     has_openai_key: bool
+    speak_results: bool
 
 
 class AppSettingsUpdate(BaseModel):
@@ -75,6 +81,7 @@ class AppSettingsUpdate(BaseModel):
     model: str | None = None
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
+    speak_results: bool | None = None
 
 
 class ModelInfo(BaseModel):

@@ -41,6 +41,7 @@ from app.schemas import (
     AppSettingsUpdate,
     ApprovalResponse,
     FeedbackRequest,
+    SpeakRequest,
     ModelInfo,
     ModelListResponse,
     ToolCallResponse,
@@ -49,6 +50,7 @@ from app.schemas import (
 from app.quick_command import QuickCommand
 from app.settings_store import SettingsStore
 from app.task_store import TaskStore
+from app.tts import MacSayTTS, TextToSpeechProvider, TTSError
 from app.stt import MoonshineSTT, SpeechToTextProvider, STTError
 
 log = logging.getLogger(__name__)
@@ -101,6 +103,7 @@ def _settings_response(saved: dict) -> AppSettingsResponse:
         model=saved.get("model"),
         has_anthropic_key=bool(saved.get("anthropic_api_key")),
         has_openai_key=bool(saved.get("openai_api_key")),
+        speak_results=bool(saved.get("speak_results", True)),
     )
 
 
@@ -267,7 +270,13 @@ def agent_run(
         result = runtime.run(request.goal, cancel_check=activity.cancel_check, question_check=help_request.question, task_id=task_id)
     finally:
         watcher.stop()
-    return _finish_run(result, activity)
+    response = _finish_run(result, activity)
+    if request.voice and result.error not in ("paused", "cancelled") and SettingsStore().get().get("speak_results", True):
+        try:
+            get_tts_provider().speak(response.final_message or response.error or "")
+        except TTSError as exc:
+            log.warning("could not speak result: %s", exc)
+    return response
 
 
 @app.post("/api/agent/resume", response_model=AgentRunResponse)
@@ -463,8 +472,30 @@ def _run_quick_goal(goal: str, on_step) -> tuple[bool, str]:
 
 
 @lru_cache
+def get_tts_provider() -> TextToSpeechProvider:
+    return MacSayTTS()
+
+
+@app.post("/api/tts/speak")
+def tts_speak(request: SpeakRequest, tts: TextToSpeechProvider = Depends(get_tts_provider)) -> dict[str, str]:
+    try:
+        tts.speak(request.text)
+    except TTSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "speaking"}
+
+
+@app.post("/api/tts/stop")
+def tts_stop(tts: TextToSpeechProvider = Depends(get_tts_provider)) -> dict[str, str]:
+    tts.stop()
+    return {"status": "stopped"}
+
+
+@lru_cache
 def get_quick_command() -> QuickCommand:
-    return QuickCommand(get_stt_provider(), _run_quick_goal)
+    return QuickCommand(
+        get_stt_provider(), _run_quick_goal, get_tts_provider(), lambda: bool(SettingsStore().get().get("speak_results", True))
+    )
 
 
 @app.get("/api/quick/events")

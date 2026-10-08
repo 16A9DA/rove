@@ -11,6 +11,7 @@ type AppSettings = {
   model: string | null;
   has_anthropic_key: boolean;
   has_openai_key: boolean;
+  speak_results: boolean;
 };
 
 type ModelInfo = { id: string; display_name: string };
@@ -20,6 +21,7 @@ const PROVIDER_LABEL: Record<Provider, string> = { anthropic: "Claude (Anthropic
 export function Settings({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [provider, setProvider] = useState<Provider>("anthropic");
+  const [speakResults, setSpeakResults] = useState(true);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -32,6 +34,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       .then((data: AppSettings) => {
         setSettings(data);
         setProvider(data.provider);
+        setSpeakResults(data.speak_results);
         setModel(data.model ?? "");
       })
       .catch(() => setSaveState("error"));
@@ -55,7 +58,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const handleSave = async () => {
     setSaveState("saving");
     try {
-      const body: Record<string, string> = { provider, model };
+      const body: Record<string, string | boolean> = { provider, model, speak_results: speakResults };
       if (apiKey) body[provider === "anthropic" ? "anthropic_api_key" : "openai_api_key"] = apiKey;
 
       const response = await fetch(`${ROVE_API_BASE}/api/settings`, {
@@ -143,6 +146,14 @@ export function Settings({ onClose }: { onClose: () => void }) {
         </button>
         {saveState === "saved" && <p className="text-sm text-emerald-400">Saved.</p>}
         {saveState === "error" && <p className="text-sm text-red-400">Could not save settings.</p>}
+
+        <label className="flex items-center justify-between gap-3 text-sm text-white/80">
+          <span>
+            Speak results aloud
+            <span className="block text-white/40">For tasks you start by voice. Hold Command and talk to interrupt.</span>
+          </span>
+          <input type="checkbox" checked={speakResults} onChange={(e) => setSpeakResults(e.target.checked)} className="h-4 w-4 accent-white" />
+        </label>
 
         <MemoryList />
 

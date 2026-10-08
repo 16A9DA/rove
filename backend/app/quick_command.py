@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable
 
 from app.stt import SpeechToTextProvider, STTError
+from app.tts import TextToSpeechProvider, TTSError
 
 log = logging.getLogger(__name__)
 
@@ -16,8 +17,16 @@ class QuickCommand:
     # Drives the Command-hold popover: idle -> listening -> transcribing -> executing -> complete | error.
     # Subscribers (the SSE route) get every state change; the run itself is one blocking call, so
     # "executing" covers the whole agent run until per-step activity events exist.
-    def __init__(self, stt: SpeechToTextProvider, run_goal: Callable[[str, Callable[[str], None]], tuple[bool, str]]) -> None:
+    def __init__(
+        self,
+        stt: SpeechToTextProvider,
+        run_goal: Callable[[str, Callable[[str], None]], tuple[bool, str]],
+        tts: TextToSpeechProvider | None = None,
+        should_speak: Callable[[], bool] = lambda: False,
+    ) -> None:
         self._stt = stt
+        self._tts = tts
+        self._should_speak = should_speak
         self._run_goal = run_goal
         self._lock = threading.Lock()
         self._subscribers: list[queue.Queue] = []
@@ -50,7 +59,16 @@ class QuickCommand:
         for q in subscribers:
             q.put({"state": state, "message": message})
 
+    def _speak(self, text: str) -> None:
+        if self._tts is not None and self._should_speak():
+            try:
+                self._tts.speak(text)
+            except TTSError as exc:
+                log.warning("could not speak result: %s", exc)
+
     def on_hold(self) -> None:
+        if self._tts is not None:
+            self._tts.stop()  # talking over a spoken answer: cut it off
         with self._lock:
             if self._busy:
                 return
@@ -86,6 +104,8 @@ class QuickCommand:
                 log.warning("quick command run failed: %s", type(exc).__name__)
                 self._set("error", "Something went wrong.")
                 return
-            self._set("complete" if ok else "error", message or ("Done." if ok else "Failed."))
+            final = message or ("Done." if ok else "Failed.")
+            self._set("complete" if ok else "error", final)
+            self._speak(final)
         finally:
             self._busy = False

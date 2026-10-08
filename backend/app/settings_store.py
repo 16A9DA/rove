@@ -14,6 +14,7 @@ DEFAULTS: dict[str, Any] = {
     "model": None,
     "anthropic_api_key": None,
     "openai_api_key": None,
+    "speak_results": True,
 }
 
 
@@ -31,7 +32,7 @@ class SettingsStore:
         # in the UI shouldn't erase a previously saved key).
         current = self.get()
         for key, value in patch.items():
-            if value:
+            if value or isinstance(value, bool):
                 current[key] = value
         self._path.write_text(json.dumps(current))
         return current

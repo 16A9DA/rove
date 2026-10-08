@@ -95,10 +95,10 @@ export function AppShell() {
     stream.current = source;
   };
 
-  const startRun = async (text: string) => {
+  const startRun = async (text: string, voice = false) => {
     const taskId = beginTurn(text);
     openStream(taskId, true);
-    await runAgent(taskId, "/api/agent/run", { goal: text, task_id: taskId });
+    await runAgent(taskId, "/api/agent/run", { goal: text, task_id: taskId, voice });
   };
 
   const handleSend = async (text: string) => {
@@ -177,7 +177,7 @@ export function AppShell() {
 
   const handleVoiceCommand = async (text: string) => {
     if (agentState === "thinking" || agentState === "executing") return;
-    await startRun(text);
+    await startRun(text, true);
   };
 
   const handleResume = async (decision?: "approve" | "deny") => {
