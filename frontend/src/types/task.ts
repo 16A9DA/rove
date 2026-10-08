@@ -25,3 +25,10 @@ export type Task = {
   status: TaskStatus;
   createdAt: number;
 };
+
+export type ActivityStep = {
+  id: string;
+  agent: string;
+  label: string;
+  status: "running" | "ok" | "error";
+};

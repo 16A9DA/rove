@@ -25,6 +25,7 @@ class AgentMessageResponse(BaseModel):
 
 class AgentRunRequest(BaseModel):
     goal: str
+    task_id: str | None = None
 
 
 class AgentResumeRequest(BaseModel):

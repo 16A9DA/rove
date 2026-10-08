@@ -1,44 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Chat } from "@/components/Chat";
 import { Settings } from "@/components/Settings";
 import { Sidebar } from "@/components/Sidebar";
 import { ROVE_API_BASE } from "@/lib/roveApi";
-import type { AgentState, Message, Task } from "@/types/task";
+import type { ActivityStep, AgentState, Message, Task } from "@/types/task";
 
 type View = "chat" | "settings";
-
-// ponytail: agent loop is simulated with timeouts, no backend wired yet.
-// Real loop (Groq + tools + controller) lands in Phase 9.
-function simulateAgentRun(
-  text: string,
-  onExecuting: () => void,
-  onDone: (message: Message, status: Task["status"]) => void,
-) {
-  const isError = /error/i.test(text);
-
-  const executingTimer = setTimeout(onExecuting, 700);
-  const doneTimer = setTimeout(() => {
-    onDone(
-      {
-        id: crypto.randomUUID(),
-        role: "agent",
-        content: isError
-          ? "Ran into a problem completing that task. The target application did not respond."
-          : "Done. Task completed.",
-        isError,
-        createdAt: Date.now(),
-      },
-      isError ? "error" : "complete",
-    );
-  }, 1600);
-
-  return () => {
-    clearTimeout(executingTimer);
-    clearTimeout(doneTimer);
-  };
-}
 
 export function AppShell() {
   const [view, setView] = useState<View>("chat");
@@ -47,6 +16,10 @@ export function AppShell() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [pausedBackendTaskId, setPausedBackendTaskId] = useState<string | null>(null);
+  const [steps, setSteps] = useState<ActivityStep[]>([]);
+  const stream = useRef<EventSource | null>(null);
+  const lastSeq = useRef(0);
+  const runningBackendId = useRef<string | null>(null);
 
   const beginTurn = (text: string): string => {
     const userMessage: Message = {
@@ -82,24 +55,52 @@ export function AppShell() {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
   };
 
-  const handleSend = (text: string) => {
-    if (agentState === "thinking" || agentState === "executing") return;
-
-    const taskId = beginTurn(text);
-    simulateAgentRun(
-      text,
-      () => setAgentState("executing"),
-      (agentMessage, status) => finishTurn(taskId, agentMessage, status),
-    );
+  // Live steps arrive over SSE while the run's POST is still blocking; a resume
+  // reconnects with the last seen seq so earlier steps aren't replayed.
+  const openStream = (backendTaskId: string, fresh: boolean) => {
+    stream.current?.close();
+    if (fresh) {
+      lastSeq.current = 0;
+      setSteps([]);
+    }
+    runningBackendId.current = backendTaskId;
+    const source = new EventSource(`${ROVE_API_BASE}/api/agent/${backendTaskId}/events?after=${lastSeq.current}`);
+    source.onmessage = (message) => {
+      const event = JSON.parse(message.data);
+      lastSeq.current = event.seq;
+      if (event.type === "step") {
+        setSteps((prev) => {
+          const next: ActivityStep = { id: event.id, agent: event.agent, label: event.label, status: event.status };
+          return prev.some((s) => s.id === event.id) ? prev.map((s) => (s.id === event.id ? next : s)) : [...prev, next];
+        });
+      } else if (event.type === "run_finished") {
+        source.close();
+      }
+    };
+    source.onerror = () => source.close();
+    stream.current = source;
   };
 
-  // Voice commands skip the simulated loop and hit the real orchestrator —
-  // Phase 14 connects Moonshine's transcript straight through to the agent
-  // running on the real computer, unlike typed messages (still simulated
-  // until the rest of the chat loop is wired up).
+  const startRun = async (text: string) => {
+    const taskId = beginTurn(text);
+    const backendTaskId = crypto.randomUUID();
+    openStream(backendTaskId, true);
+    await runAgent(taskId, "/api/agent/run", { goal: text, task_id: backendTaskId });
+  };
+
+  const handleSend = async (text: string) => {
+    if (agentState === "thinking" || agentState === "executing") return;
+    await startRun(text);
+  };
+
+  const handleStop = async () => {
+    if (!runningBackendId.current) return;
+    await fetch(`${ROVE_API_BASE}/api/agent/${runningBackendId.current}/stop`, { method: "POST" }).catch(() => undefined);
+  };
+
   // Shared by the initial run and a resume — both just POST to a different
   // endpoint and land the same way: paused (mouse/keyboard touched mid-run,
-  // resumable), done, or errored.
+  // resumable), stopped, done, or errored.
   const runAgent = async (taskId: string, path: string, body: Record<string, unknown>) => {
     setAgentState("executing");
 
@@ -111,7 +112,8 @@ export function AppShell() {
       });
       const responseBody = await response.json();
       const isPaused = response.ok && responseBody.error === "paused";
-      const isError = !response.ok || (!isPaused && !responseBody.success);
+      const isCancelled = response.ok && responseBody.error === "cancelled";
+      const isError = !response.ok || (!isPaused && !isCancelled && !responseBody.success);
       setPausedBackendTaskId(isPaused ? responseBody.task_id : null);
       finishTurn(
         taskId,
@@ -122,7 +124,9 @@ export function AppShell() {
             ? responseBody.question
               ? `Paused — needs your help: ${responseBody.question}`
               : "Paused — mouse or keyboard touched. Press Continue to resume."
-            : isError
+            : isCancelled
+              ? "Stopped."
+              : isError
               ? (responseBody.detail ?? responseBody.error ?? "Ran into a problem completing that task.")
               : (responseBody.final_message ?? "Done."),
           isError,
@@ -148,19 +152,19 @@ export function AppShell() {
 
   const handleVoiceCommand = async (text: string) => {
     if (agentState === "thinking" || agentState === "executing") return;
-
-    const taskId = beginTurn(text);
-    await runAgent(taskId, "/api/agent/run", { goal: text });
+    await startRun(text);
   };
 
   const handleResume = async () => {
     if (!pausedBackendTaskId || !activeTaskId) return;
     setTasks((prev) => prev.map((t) => (t.id === activeTaskId ? { ...t, status: "running" } : t)));
+    openStream(pausedBackendTaskId, false);
     await runAgent(activeTaskId, "/api/agent/resume", { task_id: pausedBackendTaskId });
   };
 
   const handleNewTask = () => {
     setMessages([]);
+    setSteps([]);
     setActiveTaskId(null);
     setAgentState("idle");
     setView("chat");
@@ -171,6 +175,7 @@ export function AppShell() {
     // reopening a task starts a fresh conversation scoped to it.
     setActiveTaskId(id);
     setMessages([]);
+    setSteps([]);
     setAgentState("idle");
     setView("chat");
   };
@@ -187,7 +192,15 @@ export function AppShell() {
 
       <main className="flex-1 overflow-hidden">
         {view === "chat" ? (
-          <Chat messages={messages} agentState={agentState} onSend={handleSend} onVoiceCommand={handleVoiceCommand} onResume={handleResume} />
+          <Chat
+            messages={messages}
+            agentState={agentState}
+            steps={steps}
+            onSend={handleSend}
+            onVoiceCommand={handleVoiceCommand}
+            onResume={handleResume}
+            onStop={handleStop}
+          />
         ) : (
           <Settings onClose={() => setView("chat")} />
         )}

@@ -1,6 +1,7 @@
 import json
 import logging
 import queue
+import uuid
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
@@ -13,6 +14,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 from app import paused_runs
+from app.activity import Activity, ActivityBus
 from agents import AgentRuntime, orchestrator_runtime
 from app.controllers import BrowserController, NativeComputerController
 from app.help_request import HelpRequest
@@ -160,16 +162,35 @@ def get_help_request() -> HelpRequest:
     return HelpRequest()
 
 
+@lru_cache
+def get_activity_bus() -> ActivityBus:
+    return ActivityBus()
+
+
+# Same per-request pattern as the watcher/help request: the route binds the task id,
+# the orchestrator emits through it, and Stop (via the bus) folds into the cancel check.
+def get_activity(
+    bus: ActivityBus = Depends(get_activity_bus), watcher: InputInterruptWatcher = Depends(get_input_watcher)
+) -> Activity:
+    return Activity(bus, watcher.is_interrupted)
+
+
 def get_orchestrator(
     provider: LLMProvider = Depends(get_provider),
     browser: BrowserController = Depends(get_browser_controller),
     native: NativeComputerController = Depends(get_native_controller),
     memory: MemoryService = Depends(get_memory_service),
-    watcher: InputInterruptWatcher = Depends(get_input_watcher),
+    activity: Activity = Depends(get_activity),
     help_request: HelpRequest = Depends(get_help_request),
 ) -> AgentRuntime:
     return orchestrator_runtime(
-        provider, browser=browser, native=native, memory=memory, cancel_check=watcher.is_interrupted, help_request=help_request
+        provider,
+        browser=browser,
+        native=native,
+        memory=memory,
+        cancel_check=activity.cancel_check,
+        help_request=help_request,
+        on_event=activity.emit,
     )
 
 
@@ -184,19 +205,40 @@ def _run_response(result) -> AgentRunResponse:
     )
 
 
+def _finish_run(result, activity: Activity):
+    # A Stop looks like a pause to the loop (state saved); drop that state so it can't be resumed.
+    if result.error == "paused" and activity.stopped():
+        paused_runs.pop(result.task_id)
+        result.error = "cancelled"
+        result.question = None
+    activity.clear_stop()
+    if result.error == "paused":
+        status = "paused"
+    elif result.error == "cancelled":
+        status = "cancelled"
+    else:
+        status = "ok" if result.success else "error"
+    activity.emit({"type": "run_finished", "status": status, "message": result.question or result.final_message or result.error or ""})
+    return _run_response(result)
+
+
 @app.post("/api/agent/run", response_model=AgentRunResponse)
 def agent_run(
     request: AgentRunRequest,
     runtime: AgentRuntime = Depends(get_orchestrator),
     watcher: InputInterruptWatcher = Depends(get_input_watcher),
     help_request: HelpRequest = Depends(get_help_request),
+    activity: Activity = Depends(get_activity),
 ) -> AgentRunResponse:
+    task_id = request.task_id or str(uuid.uuid4())
+    activity.bind(task_id)
+    activity.emit({"type": "run_started", "label": "Starting"})
     watcher.start()
     try:
-        result = runtime.run(request.goal, cancel_check=watcher.is_interrupted, question_check=help_request.question)
+        result = runtime.run(request.goal, cancel_check=activity.cancel_check, question_check=help_request.question, task_id=task_id)
     finally:
         watcher.stop()
-    return _run_response(result)
+    return _finish_run(result, activity)
 
 
 @app.post("/api/agent/resume", response_model=AgentRunResponse)
@@ -205,18 +247,51 @@ def agent_resume(
     runtime: AgentRuntime = Depends(get_orchestrator),
     watcher: InputInterruptWatcher = Depends(get_input_watcher),
     help_request: HelpRequest = Depends(get_help_request),
+    activity: Activity = Depends(get_activity),
 ) -> AgentRunResponse:
     messages = paused_runs.pop(request.task_id)
     if messages is None:
         raise HTTPException(status_code=404, detail="no paused run for that task_id")
+    activity.bind(request.task_id)
+    activity.emit({"type": "run_started", "label": "Resuming"})
     watcher.start()
     try:
         result = runtime.run(
-            task_id=request.task_id, resume_messages=messages, cancel_check=watcher.is_interrupted, question_check=help_request.question
+            task_id=request.task_id, resume_messages=messages, cancel_check=activity.cancel_check, question_check=help_request.question
         )
     finally:
         watcher.stop()
-    return _run_response(result)
+    return _finish_run(result, activity)
+
+
+@app.post("/api/agent/{task_id}/stop")
+def agent_stop(task_id: str, bus: ActivityBus = Depends(get_activity_bus)) -> dict[str, str]:
+    bus.request_stop(task_id)
+    return {"status": "stopping"}
+
+
+@app.get("/api/agent/{task_id}/events")
+def agent_events(task_id: str, after: int = 0, bus: ActivityBus = Depends(get_activity_bus)) -> StreamingResponse:
+    def stream():
+        backlog, q = bus.subscribe(task_id, after)
+        try:
+            for event in backlog:
+                yield f"data: {json.dumps(event)}\n\n"
+                if event["type"] == "run_finished":
+                    return
+            while True:
+                try:
+                    event = q.get(timeout=15)
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(event)}\n\n"
+                if event["type"] == "run_finished":
+                    return
+        finally:
+            bus.unsubscribe(task_id, q)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @lru_cache
@@ -242,7 +317,7 @@ def stt_stop(stt: SpeechToTextProvider = Depends(get_stt_provider)) -> Transcrib
     return TranscribeResponse(transcript=transcript)
 
 
-def _run_quick_goal(goal: str) -> tuple[bool, str]:
+def _run_quick_goal(goal: str, on_step) -> tuple[bool, str]:
     try:
         provider = get_provider(get_settings_store())
     except HTTPException as exc:
@@ -250,6 +325,15 @@ def _run_quick_goal(goal: str) -> tuple[bool, str]:
     native = get_native_controller()
     watcher = InputInterruptWatcher(native.source_state_id)
     help_request = HelpRequest()
+    activity = Activity(get_activity_bus(), watcher.is_interrupted)
+    task_id = str(uuid.uuid4())
+    activity.bind(task_id)
+
+    def on_event(event: dict) -> None:
+        activity.emit(event)
+        if event["type"] == "step" and event["status"] == "running":
+            on_step(event["label"])
+
     runtime = orchestrator_runtime(
         provider,
         browser=get_browser_controller(),
@@ -257,10 +341,11 @@ def _run_quick_goal(goal: str) -> tuple[bool, str]:
         memory=get_memory_service(),
         cancel_check=watcher.is_interrupted,
         help_request=help_request,
+        on_event=on_event,
     )
     watcher.start()
     try:
-        result = runtime.run(goal, cancel_check=watcher.is_interrupted, question_check=help_request.question)
+        result = runtime.run(goal, cancel_check=watcher.is_interrupted, question_check=help_request.question, task_id=task_id)
     finally:
         watcher.stop()
     if result.question:

@@ -16,7 +16,7 @@ class QuickCommand:
     # Drives the Command-hold popover: idle -> listening -> transcribing -> executing -> complete | error.
     # Subscribers (the SSE route) get every state change; the run itself is one blocking call, so
     # "executing" covers the whole agent run until per-step activity events exist.
-    def __init__(self, stt: SpeechToTextProvider, run_goal: Callable[[str], tuple[bool, str]]) -> None:
+    def __init__(self, stt: SpeechToTextProvider, run_goal: Callable[[str, Callable[[str], None]], tuple[bool, str]]) -> None:
         self._stt = stt
         self._run_goal = run_goal
         self._lock = threading.Lock()
@@ -81,7 +81,7 @@ class QuickCommand:
                 return
             self._set("executing", transcript)
             try:
-                ok, message = self._run_goal(transcript)
+                ok, message = self._run_goal(transcript, lambda label: self._set("executing", label))
             except Exception as exc:
                 log.warning("quick command run failed: %s", type(exc).__name__)
                 self._set("error", "Something went wrong.")

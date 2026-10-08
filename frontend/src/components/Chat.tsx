@@ -1,22 +1,27 @@
 "use client";
 
+import { ActivityFeed } from "@/components/ActivityFeed";
 import { AgentStatus } from "@/components/AgentStatus";
 import { MessageInput } from "@/components/MessageInput";
 import { MessageList } from "@/components/MessageList";
-import type { AgentState, Message } from "@/types/task";
+import type { ActivityStep, AgentState, Message } from "@/types/task";
 
 export function Chat({
   messages,
   agentState,
+  steps,
   onSend,
   onVoiceCommand,
   onResume,
+  onStop,
 }: {
   messages: Message[];
   agentState: AgentState;
+  steps: ActivityStep[];
   onSend: (text: string) => void;
   onVoiceCommand: (text: string) => void;
   onResume?: () => void;
+  onStop?: () => void;
 }) {
   const inputDisabled = agentState === "thinking" || agentState === "executing";
 
@@ -26,6 +31,14 @@ export function Chat({
         <h1 className="text-sm font-medium text-white/80">Current Task</h1>
         <div className="flex items-center gap-2">
           <AgentStatus state={agentState} />
+          {inputDisabled && onStop && (
+            <button
+              onClick={onStop}
+              className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-white/70 hover:bg-white/[0.08]"
+            >
+              Stop
+            </button>
+          )}
           {agentState === "paused" && onResume && (
             <button
               onClick={onResume}
@@ -38,6 +51,8 @@ export function Chat({
       </div>
 
       <MessageList messages={messages} agentState={agentState} onExampleClick={onSend} />
+
+      <ActivityFeed steps={steps} />
 
       <MessageInput disabled={inputDisabled} onSend={onSend} onVoiceCommand={onVoiceCommand} />
     </div>

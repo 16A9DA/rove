@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app import paused_runs
+from app.activity import describe_tool
 from app.providers import LLMProvider, LLMProviderError
 from app.tools import ToolExecutor, ToolRegistry
 
@@ -58,6 +59,8 @@ class AgentRuntime:
         max_steps: int = DEFAULT_MAX_STEPS,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         on_finish: Callable[[], None] | None = None,
+        agent_name: str = "agent",
+        on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._provider = provider
         self._registry = registry
@@ -66,6 +69,12 @@ class AgentRuntime:
         self._max_steps = max_steps
         self._timeout_seconds = timeout_seconds
         self._on_finish = on_finish
+        self._agent_name = agent_name
+        self._on_event = on_event
+
+    def _emit(self, event_type: str, **fields: Any) -> None:
+        if self._on_event is not None:
+            self._on_event({"type": event_type, "agent": self._agent_name, **fields})
 
     def run(
         self,
@@ -133,7 +142,10 @@ class AgentRuntime:
             )
 
             for tool_call in response.tool_calls:
+                label = describe_tool(tool_call.name, tool_call.arguments)
+                self._emit("step", id=tool_call.id, label=label, status="running")
                 result = self._executor.execute(tool_call.id, tool_call.name, tool_call.arguments)
+                self._emit("step", id=tool_call.id, label=label, status="error" if result.is_error else "ok")
                 actions.append(ActionSummary(tool_call.name, tool_call.arguments, result.content, result.is_error))
                 messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result.content})
                 if result.image_base64:

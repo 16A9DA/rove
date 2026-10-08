@@ -125,6 +125,7 @@ def orchestrator_runtime(
     memory: MemoryService | None = None,
     cancel_check: Callable[[], bool] | None = None,
     help_request: HelpRequest | None = None,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
 ) -> AgentRuntime:
     # A fresh sub-AgentRuntime (and message history) is built per delegate call, but
     # the underlying controller is shared across the whole task — a browser tab or
@@ -145,13 +146,19 @@ def orchestrator_runtime(
     def build_browser_runtime() -> AgentRuntime:
         # Real headed Chrome (BrowserController) is already visible on screen — no need
         # to also open the result in the user's separate default browser on finish.
-        return AgentRuntime(provider, browser_registry(browser, help_request), _with_memory(BROWSER_SYSTEM_PROMPT))
+        return AgentRuntime(
+            provider, browser_registry(browser, help_request), _with_memory(BROWSER_SYSTEM_PROMPT), agent_name="browser", on_event=on_event
+        )
 
     def build_desktop_runtime() -> AgentRuntime:
-        return AgentRuntime(provider, desktop_registry(native, help_request), _with_memory(DESKTOP_SYSTEM_PROMPT))
+        return AgentRuntime(
+            provider, desktop_registry(native, help_request), _with_memory(DESKTOP_SYSTEM_PROMPT), agent_name="desktop", on_event=on_event
+        )
 
     def build_research_runtime() -> AgentRuntime:
-        return AgentRuntime(provider, research_registry(help_request), _with_memory(RESEARCH_SYSTEM_PROMPT))
+        return AgentRuntime(
+            provider, research_registry(help_request), _with_memory(RESEARCH_SYSTEM_PROMPT), agent_name="research", on_event=on_event
+        )
 
     registry = ToolRegistry()
     registry.register(Tool("delegate_browser", "Delegate a subtask to the browser specialist agent.", SubtaskParams, ToolRiskLevel.LOW, _make_delegate(build_browser_runtime, cancel_check, help_request.question)))
@@ -162,5 +169,10 @@ def orchestrator_runtime(
     registry.register(Tool("finish", "Report the whole goal as complete with a result.", FinishParams, ToolRiskLevel.LOW, finish))
 
     return AgentRuntime(
-        provider, registry, _with_memory(ORCHESTRATOR_SYSTEM_PROMPT), timeout_seconds=ORCHESTRATOR_TIMEOUT_SECONDS
+        provider,
+        registry,
+        _with_memory(ORCHESTRATOR_SYSTEM_PROMPT),
+        timeout_seconds=ORCHESTRATOR_TIMEOUT_SECONDS,
+        agent_name="orchestrator",
+        on_event=on_event,
     )
