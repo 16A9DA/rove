@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.help_request import HelpRequest
@@ -32,6 +33,7 @@ _lock = threading.Lock()
 _pending: dict[str, Approval] = {}
 _granted: dict[str, set[str]] = {}
 _denied: dict[str, set[str]] = {}
+audit_sink: Callable[[str, str, str, str], None] | None = None  # (task_id, tool, summary, decision)
 
 
 def pending(task_id: str) -> Approval | None:
@@ -44,6 +46,8 @@ def resolve(task_id: str, approve: bool) -> Approval | None:
         approval = _pending.pop(task_id, None)
         if approval is not None:
             (_granted if approve else _denied).setdefault(task_id, set()).add(approval.fingerprint)
+            if audit_sink is not None:
+                audit_sink(task_id, approval.tool, approval.summary, "approved" if approve else "denied")
         return approval
 
 

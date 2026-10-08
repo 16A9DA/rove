@@ -85,7 +85,8 @@ def describe_tool(name: str, arguments: str) -> str:
 class ActivityBus:
     # In-process, like paused_runs: per-task event history plus live subscribers, so a
     # client that connects late (or reconnects with ?after=seq) replays what it missed.
-    def __init__(self) -> None:
+    def __init__(self, sink: Callable[[str, dict[str, Any]], None] | None = None) -> None:
+        self._sink = sink
         self._lock = threading.Lock()
         self._history: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
         self._subscribers: dict[str, list[queue.Queue]] = {}
@@ -104,6 +105,11 @@ class ActivityBus:
             event = {**event, "seq": len(history) + 1}
             history.append(event)
             subscribers = list(self._subscribers.get(task_id, []))
+        if self._sink is not None:
+            try:
+                self._sink(task_id, event)
+            except Exception:
+                pass  # persistence must never break a live run
         for q in subscribers:
             q.put(event)
 

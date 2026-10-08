@@ -46,6 +46,7 @@ from app.schemas import (
 )
 from app.quick_command import QuickCommand
 from app.settings_store import SettingsStore
+from app.task_store import TaskStore
 from app.stt import MoonshineSTT, SpeechToTextProvider, STTError
 
 log = logging.getLogger(__name__)
@@ -53,6 +54,9 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    store = get_task_store()
+    paused_runs.configure(store)
+    permissions.audit_sink = store.log_permission
     quick = get_quick_command()
     watcher = CommandKeyWatcher(quick.on_hold, quick.on_release, get_native_controller().source_state_id)
     if not watcher.start():
@@ -165,8 +169,13 @@ def get_help_request() -> HelpRequest:
 
 
 @lru_cache
+def get_task_store() -> TaskStore:
+    return TaskStore()
+
+
+@lru_cache
 def get_activity_bus() -> ActivityBus:
-    return ActivityBus()
+    return ActivityBus(sink=get_task_store().record_event)
 
 
 # Same per-request pattern as the watcher/help request: the route binds the task id,
@@ -242,6 +251,7 @@ def agent_run(
     gate: PermissionGate = Depends(get_permission_gate),
 ) -> AgentRunResponse:
     task_id = request.task_id or str(uuid.uuid4())
+    get_task_store().start_run(task_id, request.goal)
     activity.bind(task_id)
     gate.bind(task_id)
     activity.emit({"type": "run_started", "label": "Starting"})
@@ -289,6 +299,26 @@ def agent_resume(
     finally:
         watcher.stop()
     return _finish_run(result, activity)
+
+
+@app.get("/api/tasks")
+def list_tasks(store: TaskStore = Depends(get_task_store)) -> list[dict]:
+    return store.list_tasks()
+
+
+@app.get("/api/tasks/{task_id}")
+def get_task(task_id: str, store: TaskStore = Depends(get_task_store)) -> dict:
+    task = store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="no such task")
+    return task
+
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str, store: TaskStore = Depends(get_task_store)) -> dict[str, str]:
+    if not store.delete_task(task_id):
+        raise HTTPException(status_code=404, detail="no such task")
+    return {"status": "deleted"}
 
 
 @app.post("/api/agent/{task_id}/stop")
@@ -365,6 +395,7 @@ def _run_quick_goal(goal: str, on_step) -> tuple[bool, str]:
     activity.bind(task_id)
     gate = PermissionGate(help_request)
     gate.bind(task_id)
+    get_task_store().start_run(task_id, goal)
 
     def on_event(event: dict) -> None:
         activity.emit(event)

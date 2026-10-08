@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Chat } from "@/components/Chat";
 import { Settings } from "@/components/Settings";
 import { Sidebar } from "@/components/Sidebar";
@@ -8,6 +8,8 @@ import { ROVE_API_BASE } from "@/lib/roveApi";
 import type { ActivityStep, AgentState, Message, PreviewFrame, Task } from "@/types/task";
 
 type View = "chat" | "settings";
+
+const titleFor = (text: string) => (text.length > 40 ? `${text.slice(0, 40)}…` : text);
 
 export function AppShell() {
   const [view, setView] = useState<View>("chat");
@@ -23,6 +25,16 @@ export function AppShell() {
   const lastSeq = useRef(0);
   const runningBackendId = useRef<string | null>(null);
 
+  useEffect(() => {
+    fetch(`${ROVE_API_BASE}/api/tasks`)
+      .then((response) => response.json())
+      .then((rows: { id: string; title: string; status: Task["status"]; created_at: number }[]) =>
+        // a run still marked "running" at startup died with the previous process
+        setTasks(rows.map((r) => ({ id: r.id, title: titleFor(r.title), status: r.status === "running" ? "error" : r.status, createdAt: r.created_at * 1000 }))),
+      )
+      .catch(() => undefined);
+  }, []);
+
   const beginTurn = (text: string): string => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -32,20 +44,15 @@ export function AppShell() {
     };
     setMessages((prev) => [...prev, userMessage]);
 
-    let taskId = activeTaskId;
-    if (!taskId) {
-      taskId = crypto.randomUUID();
-      const newTask: Task = {
-        id: taskId,
-        title: text.length > 40 ? `${text.slice(0, 40)}…` : text,
-        status: "running",
-        createdAt: Date.now(),
-      };
-      setTasks((prev) => [newTask, ...prev]);
-      setActiveTaskId(taskId);
-    } else {
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: "running" } : t)));
-    }
+    const taskId = crypto.randomUUID();
+    const newTask: Task = {
+      id: taskId,
+      title: titleFor(text),
+      status: "running",
+      createdAt: Date.now(),
+    };
+    setTasks((prev) => [newTask, ...prev]);
+    setActiveTaskId(taskId);
 
     setAgentState("thinking");
     return taskId;
@@ -88,9 +95,8 @@ export function AppShell() {
 
   const startRun = async (text: string) => {
     const taskId = beginTurn(text);
-    const backendTaskId = crypto.randomUUID();
-    openStream(backendTaskId, true);
-    await runAgent(taskId, "/api/agent/run", { goal: text, task_id: backendTaskId });
+    openStream(taskId, true);
+    await runAgent(taskId, "/api/agent/run", { goal: text, task_id: taskId });
   };
 
   const handleSend = async (text: string) => {
@@ -178,15 +184,28 @@ export function AppShell() {
     setView("chat");
   };
 
-  const handleSelectTask = (id: string) => {
-    // ponytail: task transcripts aren't persisted yet (Phase 23), so
-    // reopening a task starts a fresh conversation scoped to it.
+  const handleSelectTask = async (id: string) => {
     setActiveTaskId(id);
-    setMessages([]);
-    setSteps([]);
-    setPreview(null);
-    setAgentState("idle");
     setView("chat");
+    if (tasks.find((t) => t.id === id)?.status === "running" && id === runningBackendId.current) return;
+    stream.current?.close();
+    setPreview(null);
+    setApproval(null);
+    try {
+      const detail = await (await fetch(`${ROVE_API_BASE}/api/tasks/${id}`)).json();
+      const restored: Message[] = [{ id: crypto.randomUUID(), role: "user", content: detail.goal, createdAt: detail.created_at * 1000 }];
+      if (detail.result) {
+        restored.push({ id: crypto.randomUUID(), role: "agent", content: detail.result, isError: detail.is_error, createdAt: detail.created_at * 1000 });
+      }
+      setMessages(restored);
+      setSteps(detail.steps);
+      setPausedBackendTaskId(detail.status === "paused" ? id : null);
+      setAgentState(detail.status === "paused" ? "paused" : detail.status === "error" ? "error" : "complete");
+    } catch {
+      setMessages([]);
+      setSteps([]);
+      setAgentState("idle");
+    }
   };
 
   return (
