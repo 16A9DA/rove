@@ -4,6 +4,12 @@
 
 Rove is a macOS AI computer use assistant. Give it a goal by text or voice. It plans the work and operates your browser, native apps and files for you, shows what it is doing, and asks before anything risky.
 
+## Preview
+
+[![Rove demo video](media/brag.jpg)](media/brag.mp4)
+
+21 second demo: hold Command, say a goal, Rove opens Chrome and Outlook, pauses for your approval before sending, then finishes. [Watch the video](media/brag.mp4).
+
 ## Features
 
 * Text and voice goals in the full app, plus a quick mode: hold Command, speak, release.
